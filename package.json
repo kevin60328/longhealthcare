@@ -15,7 +15,9 @@
     "db:seed": "node scripts/seed-test-data.mjs",
     "db:gen-seed": "node scripts/gen-seed-sql.mjs",
     "db:push": "node scripts/db-push.mjs",
-    "visual:compare": "playwright test --config playwright.visual.config.js"
+    "visual:compare": "playwright test --config playwright.visual.config.js",
+    "parity:gen": "playwright test --config playwright.parity.config.js",
+    "db:seed-cases": "node scripts/seed-test-cases.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",

@@ -30,6 +30,18 @@ const SCREENS = [
   { key: '10-護理頁首（可分配）', proto: async p => { await protoLogin(p, 'nurse@example.com'); }, neu: async p => { await login(p, 'nurse@example.com'); await p.waitForURL(/dashboard/); }, header: true },
   { key: '11-家屬頁首', proto: async p => { await protoLogin(p, 'family@example.com'); }, neu: async p => { await login(p, 'family@example.com'); await p.waitForURL(/dashboard/); }, header: true },
   { key: '12-管理員頁首', proto: async p => { await protoLogin(p, 'admin@example.com'); }, neu: async p => { await login(p, 'admin@example.com'); await p.waitForURL(/settings/); }, header: true },
+  /* 階段 3：dashboard（原型先用 seedTestCase 建立同樣的 4 筆測試案件，兩邊資料相同） */
+  { key: '20-行政工作清單', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); }, neu: async p => { await login(p, 'staff@example.com'); } },
+  { key: '21-行政資料夾展開', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.locator('details.folder', { hasText: 'C-0002' }).locator(':scope > summary').click(); },
+    neu: async p => { await p.addInitScript(() => localStorage.removeItem('wbOpen')); await login(p, 'staff@example.com'); await p.locator('details.folder', { hasText: 'C-0002' }).locator(':scope > summary').click(); } },
+  { key: '22-行政已完成', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("workTab = 'done'; render(true)"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/dashboard.html?tab=done'); } },
+  { key: '23-護理工作清單', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); }, neu: async p => { await login(p, 'nurse@example.com'); } },
+  { key: '24-護理資料夾展開', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.locator('details.folder', { hasText: 'T-A' }).locator(':scope > summary').click(); },
+    neu: async p => { await p.addInitScript(() => localStorage.removeItem('wbOpen')); await login(p, 'nurse@example.com'); await p.locator('details.folder', { hasText: 'T-A' }).locator(':scope > summary').click(); } },
+  { key: '25-家屬個人首頁', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); }, neu: async p => { await login(p, 'family3@example.com'); } },
+  { key: '26-家屬申請紀錄', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('mycases')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/dashboard.html?view=mycases'); } },
+  { key: '27-家屬通知', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('notices')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/dashboard.html?view=notices'); } },
+  { key: '28-照服員我的住民', seed: true, proto: async p => { await protoLogin(p, 'care@example.com'); }, neu: async p => { await login(p, 'care@example.com'); } },
   { key: '13-修改密碼', proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('password')"); },
     neu: async p => { await login(p, 'family@example.com'); await p.waitForURL(/dashboard/); await p.goto('/login.html?view=password'); } }
 ];
@@ -48,7 +60,7 @@ async function protoLogin(p, email){
 const VIEWPORTS = [{ name: '桌機', width: 1280, height: 900 }, { name: '手機', width: 390, height: 844 }];
 
 for (const vp of VIEWPORTS) for (const s of SCREENS){
-  if (vp.name === '手機' && s.header === undefined && !['01-入口選擇', '02-一般申請人登入', '04-註冊一般申請人'].includes(s.key)) continue;
+  if (vp.name === '手機' && s.header === undefined && !['01-入口選擇', '02-一般申請人登入', '04-註冊一般申請人', '20-行政工作清單', '25-家屬個人首頁'].includes(s.key)) continue;
   test(`${vp.name} ${s.key}`, async ({ browser }) => {
     const shot = async (which, fn) => {
       const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, baseURL: 'http://127.0.0.1:5173' });
@@ -56,6 +68,8 @@ for (const vp of VIEWPORTS) for (const s of SCREENS){
       if (which === 'proto'){
         await ctx.addInitScript(INIT);
         await p.goto(PROTO_URL); await p.waitForSelector('#portal, #loginForm');
+        /* 需要測試案件的畫面：以管理員身分用原型自己的 seedTestCase 建立，再回到未登入狀態 */
+        if (s.seed) await p.evaluate(async () => { me = D.accounts['admin@example.com']; for (const t of testSpecs()) await seedTestCase(t.key); me = null; render(true); });
       }
       await fn(p);
       await p.waitForTimeout(1200);

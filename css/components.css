@@ -120,3 +120,8 @@ tr.cat th{background:var(--bg);color:var(--ink);font-weight:700;font-size:.92rem
   .cblock{grid-template-columns:1fr}
   .task{grid-template-columns:1fr}
 }
+/* 原型的按鈕改成連結（瀏覽器上一頁、在新分頁開啟都能用），外觀維持與原型相同 */
+.seg a{border:0;background:transparent;padding:5px 12px;border-radius:8px;cursor:pointer;text-decoration:none;color:inherit}
+.seg a[aria-pressed="true"]{background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.12);font-weight:700}
+a.tile{text-align:left;font:inherit;color:inherit;cursor:pointer;text-decoration:none}
+a.fam-sec-btn{text-decoration:none}

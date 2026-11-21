@@ -78,3 +78,5 @@ p{margin:0 0 10px}
 h1[tabindex="-1"]:focus,h2[tabindex="-1"]:focus{outline:none}
 /* 原型的「← 取消」是表單卡片裡的按鈕，會撐滿寬度、文字置中；改成連結後照樣置中 */
 .stack>a.back{text-align:center}
+/* 「← 回到首頁」等返回連結：原型是按鈕（inline-block），下方間距才會生效 */
+a.back{display:inline-block}
