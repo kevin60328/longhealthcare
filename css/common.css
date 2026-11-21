@@ -49,11 +49,11 @@ button,input,select,textarea{font:inherit;color:inherit}
 .brand-mark{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block}
 .who{font-size:.9rem;color:var(--muted)}
 .who strong{color:var(--ink)}
-.btn-ghost{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.88rem;display:inline-flex;gap:6px;align-items:center}
+.btn-ghost{text-decoration:none;color:inherit;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.88rem;display:inline-flex;gap:6px;align-items:center}
 .badge{min-width:1.4em;padding:0 6px;border-radius:999px;background:var(--bad);color:#fff;font-size:.75rem;line-height:1.5;text-align:center}
 .subnav{max-width:1180px;margin:0 auto;padding:0 16px;display:flex;gap:4px;flex-wrap:wrap}
-.subnav button{border:0;border-bottom:3px solid transparent;background:none;padding:8px 12px;cursor:pointer;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
-.subnav button[aria-current="page"]{border-bottom-color:var(--accent);color:var(--ink);font-weight:700}
+.subnav button,.subnav a{text-decoration:none;border:0;border-bottom:3px solid transparent;background:none;padding:8px 12px;cursor:pointer;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+.subnav button[aria-current="page"],.subnav a[aria-current="page"]{border-bottom-color:var(--accent);color:var(--ink);font-weight:700}
 .updbar{max-width:1180px;margin:10px auto 0;padding:0 16px}
 main{max-width:1180px;margin:0 auto;padding:20px 16px 80px}
 .narrow{max-width:640px;margin:0 auto}
@@ -69,7 +69,12 @@ p{margin:0 0 10px}
 .stack>*,.grid2>*,.split>*{min-width:0}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
-.back{border:0;background:none;color:var(--accent);cursor:pointer;padding:0;margin-bottom:8px;font-size:.95rem}
+.back{text-decoration:none;border:0;background:none;color:var(--accent);cursor:pointer;padding:0;margin-bottom:8px;font-size:.95rem}
 .muted{color:var(--muted)} .small{font-size:.88rem} .mono{font-family:var(--mono);font-size:.9em}
-.site-foot{max-width:1180px;margin:0 auto;padding:0 16px 20px;font-size:.78rem;color:var(--muted);text-align:center}
+/* 與原型 .sim-note 相同：主內容底部留 80px 給 toast，頁尾往上拉 56px */
+.site-foot{max-width:1180px;margin:-56px auto 0;padding:0 16px 20px;font-size:.78rem;color:var(--muted);text-align:center}
 .app-loading{padding:22px;text-align:center;color:var(--muted)}
+/* 程式把焦點移到標題（讓螢幕閱讀器從標題開始讀）時不顯示外框；鍵盤操作的元件仍有焦點框 */
+h1[tabindex="-1"]:focus,h2[tabindex="-1"]:focus{outline:none}
+/* 原型的「← 取消」是表單卡片裡的按鈕，會撐滿寬度、文字置中；改成連結後照樣置中 */
+.stack>a.back{text-align:center}
