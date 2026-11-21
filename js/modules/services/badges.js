@@ -1,12 +1,14 @@
 /* 導覽列徽章（紅色數字）。數字只依資料計算，切換分頁不影響（HANDOFF 6.3）。規則與原型 topBar() 相同：
  *   家屬「通知」＝未讀通知數
  *   可分配護理師「案件分配」＝待分配案件數（原型 assignState＝待分配）
- *   行政／護理「工作清單」＝待辦數（原型 tasks().length，規則在 rules/core.js）
+ *   行政／護理「工作清單」＝待辦數（原型 tasks().length，規則在 rules/core.js）；
+ *     行政另外加上「住民資料待確認」的申請數（階段 4 新增、原型沒有的功能，見 services/conflicts.js）
  *   管理員「帳號管理」＝待審核帳號數（原型管理員的 tasks() 就是待審核帳號）
  *   家屬「我的申請」、照服員「我的住民」：原型 tasks() 對這兩個角色沒有待辦，所以不顯示
  * 回傳 { 分頁 key: 數量 }；查詢失敗的分頁不顯示徽章。 */
 import { supabase } from '../../api/supabase.js';
 import { loadModel } from './model.js';
+import { countOpenConflicts } from './conflicts.js';
 
 async function countOf(query){
   const { count, error } = await query;
@@ -24,7 +26,7 @@ export async function badgeCounts(me){
   if (me.role === 'staff' || me.role === 'nurse'){
     try {
       const { D, R } = await loadModel(me);
-      out.home = R.tasks().length;
+      out.home = R.tasks().length + (me.role === 'staff' ? await countOpenConflicts() : 0);
       if (me.role === 'nurse' && me.can_assign_nurse) out.assign = Object.values(D.cases).filter(c => R.assignState(c) === '待分配').length;
     } catch (e){ console.warn('待辦數讀取失敗', e); }
   }

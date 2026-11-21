@@ -1,7 +1,7 @@
 # 開發進度（PROGRESS）
 
 > 每個階段結束時更新。開新對話時先讀 HANDOFF.md，再讀這份。
-> 最後更新：2026/11/21（階段 3 完成；資料庫正規化）
+> 最後更新：2026/11/21（階段 4 完成）
 
 ---
 
@@ -13,8 +13,8 @@
 | 1 | 資料表、RLS 輔助函式與讀取 policy、文件清單與測試資料 seed | ✅ 完成 |
 | 2 | login.html、auth／permissions／navigation、頁面守門、導覽列 | ✅ 完成 |
 | 3 | dashboard.html：家屬首頁、我的申請、通知；行政／護理個案資料夾；照服員我的住民；待辦徽章 | ✅ 完成 |
-| 4 | application.html | ⏭ 下一步 |
-| 5 | cases.html | 未開始 |
+| 4 | application.html：申請、案件詳情、同意書與代理權、緊急聯絡人、習慣卡 | ✅ 完成 |
+| 5 | cases.html | ⏭ 下一步 |
 | 6 | documents.html＋Storage＋Email 模擬＋OCR | 未開始 |
 | 7 | assessment.html | 未開始 |
 | 8 | care-summary.html | 未開始 |
@@ -88,6 +88,14 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 - 設計說明與刻意保留的例外：**`docs/DATABASE.md`**。
 - 測試抓到並修正：「非 G 類文件必須連到文件清單」的檢查遇到空值會放行（SQL 的 null 判斷），000009 修正。
 
+### 階段 4（application.html）
+- **RPC**（`…000011_application.sql`、`…000013_resident_conflicts.sql`）：create_application（一個交易內建立住民、案件、24 份文件與核對項目、申請確認通知、操作紀錄；同一申請識別碼不重複）、sign_consent／withdraw_consent／decline_consent、save_contacts、save_habit_section、submit_habit、resend_apply_mail、staff_directory、resolve_resident_conflict。
+- **使用者決定**：同一身分證字號已有住民資料但姓名或生日不同 → 不建立申請，畫面顯示「這個身分證字號已有資料且內容不同，請聯絡機構確認」，寫入 `resident_conflicts`；行政工作清單出現「住民資料待確認」卡片，填處理說明後標示已處理（計入工作清單徽章；原型沒有這個功能）。
+- **畫面**（`js/modules/application.js`、共用 `js/modules/family-ui.js`）：申請表（草稿存 sessionStorage，上一頁不遺失）、確認申請資料、已送出、案件詳情（目前要做的事、進度條、補件進度、文件進度分組、處理歷程、撤回同意、切換申請）、同意書（本人／監護人／代理人／受輔助宣告；不同意）、緊急聯絡人、習慣卡七區（分區儲存草稿、正式提交）。表單有未儲存修改時離開會提醒。
+- **代理權證明文件**：非本人簽署時加入「監護宣告裁定書／輔助宣告裁定書／代理權授權證明」（`doc_catalog.on_demand`）。
+- 與原型畫面對照 7 組（申請表、確認、待行政確認、文件審查中、同意書、聯絡人、習慣卡），差異已修正（必填星號位置、舊資料不顯示通知列）。對照截圖改存 `visual-compare/`（Playwright 每次會清空 test-results）。
+- 上傳文件、完整文件清單頁在 documents.html（階段 6）；案件詳情裡的上傳按鈕已連到那裡。
+
 ---
 
 ## 4. 測試狀態（2026/11/21 實際執行）
@@ -95,20 +103,23 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 | 測試 | 結果 |
 |---|---|
 | 單元（`tests/unit`）：帳號格式、導覽列唯一選取、頁面權限（577）＋**原型規則對照 316 個情境**＋個別規則（5） | 898 通過 |
-| RLS（`tests/rls`）：案件／文件隔離、護理只看 B/C/D、分配權限、預設拒絕寫入、操作紀錄不可改、註冊不能取得角色、bucket 私有、**正規化後的關聯與約束 13 項**、**跨案件一致性 3 項**、住民資料隔離（38）＋**資料庫→get_case_models→轉換→規則，4 筆測試案件 × 4 種身分與原型相同**（24） | 62 通過 |
-| E2E（`tests/e2e`）：階段 2 的 45 條＋dashboard 12 條（家屬首頁／紀錄／通知已讀／通知 Email、行政與護理待辦數與原型相同、資料夾收合與記住、搜尋排序、已完成、照服員） | 57 通過 |
-| 原型畫面對照（`tests/visual`） | 31 組截圖，人工比對後已修正差異 |
+| RLS＋RPC（`tests/rls`）：階段 4 寫入函式 14 項（建立申請、重複送出、住民沿用與資料不一致、格式檢查、權限、同意書、聯絡人、習慣卡提交規則、撤回、非本人簽署、人員名冊）；案件／文件隔離、護理只看 B/C/D、分配權限、預設拒絕寫入、操作紀錄不可改、註冊不能取得角色、bucket 私有、**正規化後的關聯與約束 13 項**、**跨案件一致性 3 項**、住民資料隔離（38）＋**資料庫→get_case_models→轉換→規則，4 筆測試案件 × 4 種身分與原型相同**（24） | 76 通過 |
+| E2E（`tests/e2e`）：階段 2 的 45 條＋dashboard 12 條＋**階段 4 的 6 條**（家屬完整流程、住民資料不一致與行政處理、監護人簽署、撤回同意、不同意、看不到別人的申請；放在 `tests/e2e/writes`，其他 E2E 跑完才執行） | 63 通過 |
+| 原型畫面對照（`tests/visual`） | 38 組截圖，人工比對後已修正差異 |
 
 **需人工驗收**：用真實 Email 走一次「忘記密碼」，確認信中連結回到「設定新密碼」畫面（轉址設定無法自動測）。
 
 ---
 
 ## 5. 還沒做／已知限制
-- application、cases、documents、assessment、care-summary、settings 的內容還是「建置中」（階段 4～9）；工作清單的待辦按鈕會連到這些頁面。
+- cases、documents、assessment、care-summary、settings 的內容還是「建置中」（階段 5～9）；工作清單與案件詳情的按鈕會連到這些頁面。
 - 所有寫入 RPC（建立申請、收件、補件、評估…）尚未建立；目前前端只能讀。
 - Storage policy 尚未建立（階段 6）。
 - 護理「已完成工作」：原型會列出**已移交給別人**的案件的處理摘要；正式版護理讀不到已移交的案件，所以目前不顯示。需要時可加一個只回傳摘要的 RPC。
 - 診斷清單的「標準化名稱」（原型 d.std）資料表還沒有欄位，階段 7 一併加入。
+- **測試留下的資料**：有操作紀錄的案件依規則不能刪除，所以自動測試建立的案件會「結案」、暫時帳號會「停用」，留在測試專案裡（不影響待辦與徽章）。
+- 申請確認 Email 的「重新寄送」只記錄嘗試（測試環境未介接郵件服務），真正的寄送流程在階段 6（send-mail）。
+- 行政用 application.html 會導到 cases.html（HANDOFF 寫「授權行政」也會用這頁，目前沒有原型對應畫面，有需要再確認）。
 - reference 的 Python 舊測試未移植（Python 未安裝；改寫成 JS 版 Playwright，逐階段移植）。
 
 ## 6. 與 HANDOFF 不同或補充的決定
@@ -130,13 +141,12 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 6. 部署方式與網域（15-8）；部署時要把正式網址加進 Supabase Redirect URLs。
 7. 測試專案的 secret key 與資料庫密碼曾出現在對話中，放真實資料前要更換。
 8. 是否需要 Postgres 版的案件階段函式（見第 6 節）。
-9. 同一位住民（同身分證字號）由不同家屬申請、或兩次申請填的姓名生日不同時怎麼處理（住民資料共用一份）：階段 4 建立申請時要決定，建議先擋下並請行政確認。
+9. ~~同一身分證字號資料不同~~：已決定（擋下並通知行政處理），階段 4 完成。
 
 ---
 
-## 8. 下一步：階段 4（application.html）
-- 家屬：入住申請（RPC create_application，防重複送出，建立 24 份文件與申請確認通知）、申請預覽、已送出。
-- 案件詳情（原型 familyHome）：目前要做的事、進度條（stepsInfo）、補件進度摘要、處理歷程（caseTimeline；需要把處理人員姓名加進 get_case_models）。
-- 個資同意與代理權（sign_consent、withdraw_consent；非本人簽署進入待代理權核實）、緊急聯絡人、習慣卡草稿與正式提交（submit_habit，必填 HABIT_REQ、rev 遞增）。
-- 每個寫入都要確認成功才更新畫面，失敗可重試；寫完呼叫 invalidateModel()。
-- 完成後跑 visual:compare 對照原型的申請、同意書、聯絡人、習慣卡畫面。
+## 8. 下一步：階段 5（cases.html）
+- 行政：案件列表與搜尋、案件詳情、確認申請並轉交護理（confirm_case；電話確認、病歷號、預計入住日、文件繳交期限、通知家屬）、代理權核實（verify_proxy）、記錄簽約（record_signing）、參訪與保證金、協調與結案、處理歷程。
+- 有分配權限的護理：案件分配（assign_nurse；更換要原因，保留歷程；一般護理師直接呼叫 RPC 也不能分配）。
+- 原型：staffCases、staffCase、staffApply、nurseAssignPage、assignHtml、selfConflict（利益衝突提示）。
+- 完成後跑 visual:compare 對照原型。

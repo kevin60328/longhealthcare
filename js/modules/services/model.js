@@ -45,7 +45,10 @@ function buildCase(m, accounts){
     signedAt: toStamp(r.signed_at) || null, signedTs: toTs(r.signed_at), signedBy: r.signed_by || undefined,
     closed: r.closed_at ? { at: toStamp(r.closed_at), by: r.closed_by || '', title: r.closed_title || r.closed_reason || '', reason: r.closed_reason || '' } : null,
     archived: r.archived_at ? { at: toStamp(r.archived_at), status: r.archive_status || '' } : null,
+    closedType: r.closed_type || '', applyToken: r.apply_token || '',
     createdAt: toStamp(r.created_at), createdTs: toTs(r.created_at),
+    contacts: (m.contacts || []).map(t => ({ name: t.name, rel: t.rel || '', phone: t.phone })),
+    applyMail: m.apply_mail ? { status: m.apply_mail.status, to: m.apply_mail.to_email, attempts: m.apply_mail.attempts, createdAt: toStamp(m.apply_mail.created_at) } : null,
     docList: { status: '完成' }, life: {}, full: m.full === true,
     /* 分配歷程：舊資料（分配人與時間未記錄）不列入，與原型「已有承辦護理師、沒有分配歷程」相同 */
     assignHist: (m.assignments || []).filter(a => a.at).map(a => ({ to: a.nurse_id, from: a.from_nurse_id || undefined, by: a.by, at: toStamp(a.at), ts: toTs(a.at), reason: a.reason || '' }))
@@ -54,7 +57,7 @@ function buildCase(m, accounts){
   /* 個資同意：最新一筆是目前的同意；每一筆的簽署、核實、撤回都列入歷程 */
   const ks = m.consents || [], k = ks.filter(x => x.state !== '已取代').slice(-1)[0];
   c.consent = k ? {
-    signer: k.signer_type, signerName: k.signer_name, at: toStamp(k.signed_at), ts: toTs(k.signed_at), by: k.signed_by, ver: k.ver,
+    signer: k.signer_type, signerName: k.signer_name, at: toStamp(k.signed_at), ts: toTs(k.signed_at), by: k.signed_by, ver: k.form_ver, seq: k.ver,
     state: ['有效', '待代理權核實', '代理權未通過'].includes(k.state) ? k.state : undefined,
     needsProof: k.signer_type !== '本人', proofItem: k.proof_document_id ? keyOf[k.proof_document_id] : undefined,
     withdrawnAt: toStamp(k.withdrawn_at),
@@ -64,9 +67,9 @@ function buildCase(m, accounts){
   } : null;
   if (ks.length){
     c.consentHistory = ks.flatMap(x => [
-      { event: x.signer_type === '本人' ? '簽署' : '提交同意（待代理權核實）', ver: x.ver, signer: x.signer_type, signerName: x.signer_name, at: toStamp(x.signed_at), ts: toTs(x.signed_at), by: x.signed_by },
-      ...(x.verified_at ? [{ event: x.state === '代理權未通過' ? '代理權無法核實' : '代理權確認，授權生效', ver: x.ver, signer: x.signer_type, at: toStamp(x.verified_at), ts: toTs(x.verified_at), by: x.verified_by }] : []),
-      ...(x.withdrawn_at ? [{ event: '撤回', ver: x.ver, signer: x.signer_type, at: toStamp(x.withdrawn_at), ts: toTs(x.withdrawn_at), by: x.withdrawn_by }] : [])
+      { event: x.signer_type === '本人' ? '簽署' : '提交同意（待代理權核實）', ver: x.form_ver, signer: x.signer_type, signerName: x.signer_name, at: toStamp(x.signed_at), ts: toTs(x.signed_at), by: x.signed_by },
+      ...(x.verified_at ? [{ event: x.state === '代理權未通過' ? '代理權無法核實' : '代理權確認，授權生效', ver: x.form_ver, signer: x.signer_type, at: toStamp(x.verified_at), ts: toTs(x.verified_at), by: x.verified_by }] : []),
+      ...(x.withdrawn_at ? [{ event: '撤回', ver: x.form_ver, signer: x.signer_type, at: toStamp(x.withdrawn_at), ts: toTs(x.withdrawn_at), by: x.withdrawn_by }] : [])
     ]);
   }
 
@@ -81,8 +84,10 @@ function buildCase(m, accounts){
   /* 習慣卡：草稿只有家屬讀得到；機構端只看正式提交 */
   const subs = (m.habit_submissions || []).map(s => ({ data: s.data || {}, rev: s.rev, n: s.n, at: s.legacy ? null : toStamp(s.submitted_at), ts: toTs(s.submitted_at), by: s.submitted_by || '', legacy: s.legacy || undefined }));
   const sub = subs[subs.length - 1] || null, dr = m.habit_draft;
-  if (sub || dr) c.habit = { fmt: 2, data: (dr && dr.draft) || (sub ? sub.data : {}), rev: sub ? sub.rev : 0, updatedAt: toStamp(dr && dr.draft_updated_at), updatedBy: dr && dr.draft_updated_by,
-    sub, subHist: subs.map(s => ({ n: s.n, rev: s.rev, at: s.at, ts: s.ts, by: s.by, legacy: s.legacy })) };
+  /* rev：草稿第幾次修改（家屬看得到草稿時用草稿的次數，否則用最近一次提交的版本） */
+  const secAt = Object.fromEntries((m.habit_sections || []).map(s => [s.sec, { at: toStamp(s.updated_at), by: s.updated_by }]));
+  if (sub || dr) c.habit = { fmt: 2, data: (dr && dr.draft) || (sub ? sub.data : {}), rev: dr ? dr.draft_rev : (sub ? sub.rev : 0), updatedAt: toStamp(dr && dr.draft_updated_at), updatedBy: dr && dr.draft_updated_by,
+    secAt, sub, subHist: subs.map(s => ({ n: s.n, rev: s.rev, at: s.at, ts: s.ts, by: s.by, legacy: s.legacy })) };
   /* 習慣卡初審：最新一筆是目前狀態；最近一次「審核完成」是 done。資料庫「有疑義／待確認」＝原型的「有疑義」 */
   const hrs = (m.habit_reviews || []).map(h => ({ state: h.state === '有疑義／待確認' ? '有疑義' : h.state, rev: h.rev, note: h.note || '', by: h.reviewed_by, at: toStamp(h.reviewed_at), ts: toTs(h.reviewed_at), diffRes: h.diff_res || [], snap: h.snap || {}, med: h.med_snapshot || {} }));
   if (hrs.length){
@@ -115,7 +120,7 @@ function buildCase(m, accounts){
     /* 一般提醒：次數＝提醒紀錄筆數，時間與期限取最新一筆 */
     const rems = d.reminders || [], lastRem = rems[rems.length - 1];
     items[id] = {
-      id, dbId: d.id, caseId: cid, key: d.key, cat: d.cat, name: d.name, famName: d.fam_name, need: d.not_applicable ? '不適用' : d.need, cond: d.cond || '',
+      id, dbId: d.id, caseId: cid, key: d.key, catalogKey: d.catalog_key, cat: d.cat, name: d.name, famName: d.fam_name, need: d.not_applicable ? '不適用' : d.need, cond: d.cond || '',
       condMet: d.cond_met, required: true, stage: d.stage, medical: d.medical, validDays: d.valid_days, inst: d.inst, order: d.sort,
       parts: (d.parts || []).length ? d.parts.map(p => ({ k: p.k, name: p.name, need: p.need })) : null,
       needSetBy: lastNeed ? lastNeed.by || undefined : undefined, needSetAt: lastNeed ? toStamp(lastNeed.at) : undefined, needNote: lastNeed ? lastNeed.note || '' : '',
@@ -155,18 +160,27 @@ export const invalidateModel = () => cache.clear();
 
 async function fetchModel(meProfile, { caseId = null } = {}){
   const db = supabase();
-  const [models, profiles, org, catalog] = await Promise.all([
+  const [models, profiles, org, catalog, staff] = await Promise.all([
     db.rpc('get_case_models', { p_case: caseId }),
     db.from('profiles').select('id, email, name, role, want, status, phone, can_assign_nurse'),
     db.from('org_settings').select('*').eq('id', 1).maybeSingle(),
-    db.from('doc_catalog').select('key').order('sort')
+    db.from('doc_catalog').select('key, why, "where", on_demand').order('sort'),
+    db.rpc('staff_directory')
   ]);
-  for (const r of [models, profiles, org, catalog]) if (r.error) throw r.error;
-  const accounts = Object.fromEntries(profiles.data.map(p => [p.id, toAccount(p)]));
+  for (const r of [models, profiles, org, catalog, staff]) if (r.error) throw r.error;
+  /* 機構人員名冊只有姓名與角色（家屬看處理歷程「角色｜姓名」用）；RLS 看得到的完整帳號資料優先 */
+  const accounts = Object.fromEntries(staff.data.map(p => [p.id, { id: p.id, name: p.name, role: p.role, want: p.role, status: '啟用' }]));
+  for (const p of profiles.data) accounts[p.id] = toAccount(p);
   const me = toAccount(meProfile); accounts[me.id] = accounts[me.id] || me;
-  const D = { cases: {}, items: {}, accounts, notices: {}, docKeys: catalog.data.map(r => r.key),
+  const D = { cases: {}, items: {}, accounts, notices: {}, docKeys: catalog.data.filter(r => !r.on_demand).map(r => r.key),
     settings: org.data ? { name: org.data.name, phone: org.data.phone, hours: org.data.hours, flowMode: org.data.flow_mode, requestDays: org.data.request_days, retentionDays: org.data.retention_days } : null };
-  for (const m of models.data){ const { c, items } = buildCase(m, accounts); D.cases[c.id] = c; Object.assign(D.items, items); }
+  /* 文件的準備說明（為什麼需要、去哪裡拿）在文件清單；依 catalog_key 補上 */
+  const help = Object.fromEntries(catalog.data.map(r => [r.key, r]));
+  for (const m of models.data){
+    const { c, items } = buildCase(m, accounts); D.cases[c.id] = c;
+    for (const it of Object.values(items)){ const h = help[it.catalogKey]; if (h){ it.why = h.why; it.where = h.where; } }
+    Object.assign(D.items, items);
+  }
   return { D, me, R: createRules(D, { me, today: todayTW() }) };
 }
 

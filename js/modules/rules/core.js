@@ -77,6 +77,8 @@ export const HABIT_SECS = [
     { k: 'contactNote', label: '給照顧人員的聯絡說明', hint: '例：上班時間請先傳訊息' }] }
 ];
 export const HABIT_LABEL = Object.fromEntries(HABIT_SECS.flatMap(sec => sec.fields.flatMap(f => f.type === 'adl' ? [[f.k, f.label], [f.k.replace('adl_', 'adlN_'), f.label + '（說明）']] : [[f.k, f.label]])));
+/* 家屬端必填欄位的簡短名稱（提示「還有必填欄位未填」用，原型 HABIT_LABEL_FAM） */
+export const HABIT_LABEL_FAM = { call: '稱呼', lang: '慣用語言', hearing: '聽力狀況', famAllergy: '過敏', ...Object.fromEntries(ADL_KEYS.map(([k, l]) => ['adl_' + k, '日常活動：' + l])) };
 /* 正式提交時的必要欄位（HANDOFF 10.5 HABIT_REQ） */
 export const HABIT_REQ = ['call', 'lang', 'hearing', 'famAllergy'].concat(ADL_KEYS.map(([k]) => 'adl_' + k));
 const HR_MED = [['allergy', '過敏'], ['tube', '管路'], ['swallow', '吞嚥']];
@@ -87,6 +89,8 @@ const BASIS_NAME = { tube: '管路', allergy: '藥物過敏', meds: '用藥', mo
 export const d2n = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
 export const addDays = (s, n) => new Date((d2n(s) + n) * 864e5).toISOString().slice(0, 10);
 export const slash = s => s ? s.replace(/-/g, '/') : '';
+/* 月/日（例：11/25），原型 md() */
+export const md = s => s ? `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}` : '';
 export const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || '');
 export const stampDate = s => s && /^\d{4}\/\d{2}\/\d{2}/.test(s) ? s.slice(0, 10).replace(/\//g, '-') : '';
 /* 資料庫的舊文字「長輩」只在顯示時轉成「住民」（HANDOFF 10.10） */

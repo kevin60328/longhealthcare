@@ -93,7 +93,10 @@ for (const [n, { c, items }] of bases.entries()){
 
   /* 5. 習慣卡：正式提交＋家屬草稿；護理初審歷程（審核完成那一筆附上當時的內容快照） */
   if (c.habit){
-    must(await db.from('habit_cards').insert({ case_id: cid, draft: c.habit.data || {}, draft_updated_at: iso(c.habit.updatedAt), draft_updated_by: uid(c.habit.updatedBy) }), '習慣卡草稿');
+    must(await db.from('habit_cards').insert({ case_id: cid, draft: c.habit.data || {}, draft_rev: c.habit.rev || 0, draft_updated_at: iso(c.habit.updatedAt), draft_updated_by: uid(c.habit.updatedBy) }), '習慣卡草稿');
+    /* 各區最後修改時間（原型 habit.secAt） */
+    const secs = Object.entries(c.habit.secAt || {}).map(([sec, x]) => ({ case_id: cid, sec, updated_at: iso(x.at), updated_by: uid(x.by) }));
+    if (secs.length) must(await db.from('habit_card_sections').insert(secs), '習慣卡各區修改時間');
     if (c.habit.sub) must(await db.from('habit_submissions').insert({ case_id: cid, rev: c.habit.sub.rev, n: c.habit.sub.n, data: c.habit.sub.data, submitted_by: uid(c.habit.sub.by), submitted_at: iso(c.habit.sub.at) }), '習慣卡提交');
   }
   if (c.habitReview){

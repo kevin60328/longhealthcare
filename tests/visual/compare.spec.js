@@ -3,14 +3,19 @@
  *       原型模擬資料的測試密碼是 Test1234（只存在原型的 seed.json 雜湊裡，與正式版無關）。
  * 新版：開發伺服器＋雲端測試專案，用 .env.secrets 的 SEED_PASSWORD 登入。
  * 執行：npx playwright test --config playwright.visual.config.js
- * 結果：test-results/compare/<畫面>-<proto|new>.png，以及並排的 test-results/compare/index.html */
+ * 結果：visual-compare/<畫面>-<proto|new>.png，以及並排的 visual-compare/index.html */
 import { test } from '@playwright/test';
 import { readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { login } from '../e2e/helpers.js';
+import { login, service } from '../e2e/helpers.js';
 
-const OUT = resolve('test-results/compare');
+/* 新版的案件網址要用資料庫的 uuid：依案件編號查詢 */
+const caseIdOf = async no => (await service().from('cases').select('id').eq('no', no).single()).data.id;
+const DRAFT = { pname: '王美玉', nid: 'A223456789', birth: '1940-03-15', relation: '女兒', hospital: '仁心醫院', admit: '2026-12-20', token: 'compare' };
+
+/* 不放在 test-results：Playwright 每次執行會清空 test-results，只跑部分畫面時其他截圖會不見 */
+const OUT = resolve('visual-compare');
 mkdirSync(OUT, { recursive: true });
 const PROTO_URL = pathToFileURL(resolve('reference/prototype_v18.html')).href;
 const INIT = 'window.__SEED=' + readFileSync('reference/seed.json', 'utf8') + ';' + readFileSync('reference/mock_db.js', 'utf8');
@@ -42,6 +47,15 @@ const SCREENS = [
   { key: '26-家屬申請紀錄', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('mycases')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/dashboard.html?view=mycases'); } },
   { key: '27-家屬通知', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('notices')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/dashboard.html?view=notices'); } },
   { key: '28-照服員我的住民', seed: true, proto: async p => { await protoLogin(p, 'care@example.com'); }, neu: async p => { await login(p, 'care@example.com'); } },
+  /* 階段 4：application.html */
+  { key: '30-入住申請表', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('apply')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/application.html?view=apply'); } },
+  { key: '31-確認申請資料', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate(d => { applyDraft = d; go('applyPreview'); }, DRAFT); },
+    neu: async p => { await login(p, 'family3@example.com'); await p.evaluate(d => sessionStorage.setItem('applyDraft', JSON.stringify(d)), DRAFT); await p.goto('/application.html?view=preview'); } },
+  { key: '32-案件詳情（待行政確認）', seed: true, proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('home', 'C-0001-p4t8')"); }, neu: async p => { await login(p, 'family@example.com'); await p.goto('/application.html?case=' + await caseIdOf('C-0001')); } },
+  { key: '33-案件詳情（文件審查中）', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('home', 'TEST-A')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/application.html?case=' + await caseIdOf('T-A')); } },
+  { key: '34-同意書', seed: true, proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('consent', 'C-0001-p4t8')"); }, neu: async p => { await login(p, 'family@example.com'); await p.goto('/application.html?view=consent&case=' + await caseIdOf('C-0001')); } },
+  { key: '35-緊急聯絡人', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('contacts', 'TEST-A')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/application.html?view=contacts&case=' + await caseIdOf('T-A')); } },
+  { key: '36-習慣卡', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('life', 'TEST-A')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/application.html?view=habit&case=' + await caseIdOf('T-A')); } },
   { key: '13-修改密碼', proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('password')"); },
     neu: async p => { await login(p, 'family@example.com'); await p.waitForURL(/dashboard/); await p.goto('/login.html?view=password'); } }
 ];
@@ -72,6 +86,8 @@ for (const vp of VIEWPORTS) for (const s of SCREENS){
         if (s.seed) await p.evaluate(async () => { me = D.accounts['admin@example.com']; for (const t of testSpecs()) await seedTestCase(t.key); me = null; render(true); });
       }
       await fn(p);
+      /* 等畫面真的畫好（不是「系統載入中…」），再多等一下讓字型與非同步內容穩定 */
+      await p.waitForFunction(() => { const m = document.getElementById('main'); return m && !m.querySelector('.app-loading') && m.innerText.trim().length > 20; }, null, { timeout: 20000 });
       await p.waitForTimeout(1200);
       await p.evaluate(() => document.fonts.ready);
       const file = `${OUT}/${vp.name}-${s.key}-${which}.png`;

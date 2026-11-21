@@ -51,10 +51,11 @@ export function decorateRequired(root){
     const tgt = l.tagName === 'FIELDSET' ? l.querySelector('legend') : l; if (!tgt) return;
     if (!tgt.querySelector(':scope > .req.auto, :scope > .lbl > .req.auto')){
       const star = document.createElement('span'); star.className = 'req auto'; star.setAttribute('aria-hidden', 'true'); star.textContent = '*';
-      /* 欄位名稱是文字節點時包成行內區塊，讓 * 緊接在名稱右側（label 是直式排列） */
-      const t = [...tgt.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
-      if (t){ const w = document.createElement('span'); w.className = 'lbl'; w.textContent = t.textContent.replace(/\s+$/, ''); w.appendChild(star); t.replaceWith(w); }
-      else tgt.prepend(star);
+      /* 找欄位名稱（與原型 decorateRequired 相同）：文字節點 → 包成行內區塊，讓 * 緊接在名稱右側（label 是直式排列）；
+       * STRONG／SPAN 元素（例如勾選框旁的說明文字）→ * 放在它後面；都沒有才放在最前面 */
+      const t = [...tgt.childNodes].find(n => (n.nodeType === 3 && n.textContent.trim()) || (n.nodeType === 1 && ['STRONG', 'SPAN'].includes(n.tagName) && !n.classList.contains('hint') && n.textContent.trim()));
+      if (t && t.nodeType === 3){ const w = document.createElement('span'); w.className = 'lbl'; w.textContent = t.textContent.replace(/\s+$/, ''); w.appendChild(star); t.replaceWith(w); }
+      else if (t) t.after(star); else tgt.prepend(star);
     }
     (l.tagName === 'FIELDSET' ? [...l.querySelectorAll('input,select,textarea')] : [l.querySelector('input,select,textarea')])
       .filter(Boolean).forEach(x => x.setAttribute('aria-required', 'true'));

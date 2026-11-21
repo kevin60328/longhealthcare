@@ -1,6 +1,6 @@
 /* 原型 vs 新版 畫面對照截圖用的 Playwright 設定（不屬於一般 E2E 驗收）。
  * 執行：npx playwright test --config playwright.visual.config.js
- * 結果：test-results/compare/index.html（並排對照） */
+ * 結果：visual-compare/index.html（並排對照） */
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({

@@ -1,7 +1,7 @@
 # 資料庫設計說明
 
 > 給組員與接手的人看的：資料表之間的關聯、正規化做到哪裡、哪些地方是刻意保留的例外、資料庫本身會擋下哪些錯誤。
-> 實際定義以 `supabase/migrations/` 為準（依檔名順序套用）。最後更新：2026/11/21（000010）。
+> 實際定義以 `supabase/migrations/` 為準（依檔名順序套用）。最後更新：2026/11/21（000013，階段 4）。
 
 ## 1. 正規化原則
 
@@ -20,13 +20,14 @@
 | `profiles` | 帳號、角色、狀態、手機 | → `auth.users`（Supabase 登入帳號） |
 | `org_settings` | 機構設定（只有一列） | |
 | `partner_hospitals` | 合作醫院，一院一列 | |
-| `doc_catalog` | 內建文件清單（24 項） | |
+| `doc_catalog` | 內建文件清單（24 項）＋只在需要時加入的代理權證明（`on_demand`：監護／輔助宣告裁定書、代理權授權證明） | |
 | `doc_catalog_parts` | 文件的核對項目（例如體檢的 CBC、肝功能） | → `doc_catalog` |
 
 ### 住民與案件
 | 資料表 | 內容 | 關聯 |
 |---|---|---|
 | `residents` | 住民：身分證字號（唯一）、姓名、生日、病歷號 | |
+| `resident_conflicts` | 送出申請時身分證字號已有不同的住民資料（申請未建立），待行政確認 | → `residents`、`profiles`（申請人、處理者） |
 | `cases` | 入住申請案件 | → `residents`、`profiles`（家屬、確認者、承辦護理、簽約者、結案者） |
 | `case_assignments` | 承辦護理分配歷程 | → `cases`、`profiles` |
 | `contacts` | 緊急聯絡人 | → `cases` |
@@ -54,7 +55,8 @@
 |---|---|---|
 | `diagnoses` | 診斷清單（逐筆） | → `cases`、`document_versions`（來源） |
 | `diagnosis_changes` | 診斷變更歷程 | → `diagnoses`、`profiles` |
-| `habit_cards` | 習慣卡草稿 | → `cases` |
+| `habit_cards` | 習慣卡草稿（`draft_rev`＝第幾次修改） | → `cases` |
+| `habit_card_sections` | 習慣卡各區最後修改 | → `habit_cards`、`profiles` |
 | `habit_submissions` | 習慣卡正式提交（rev 遞增） | → `cases`、`profiles` |
 | `habit_reviews` | 護理初審 | → `habit_submissions`（案件＋rev）、`profiles` |
 | `assessments` | 收治評估（含協調紀錄） | → `cases`、`profiles` |
@@ -95,12 +97,25 @@
 - 修改或刪除操作紀錄（連 service role 也不行）
 - **跨案件的矛盾資料**（000010）：代理權證明、診斷來源文件、沿用的文件檔案，都必須屬於同一個案件（前兩者用「文件＋案件」複合外鍵，第三個用觸發器）
 
-## 5. 實際檢查結果（2026/11/21，直接查詢雲端測試專案）
+## 5. 寫入方式（RPC，一個交易內完成）
+
+| 階段 | RPC | 內容 |
+|---|---|---|
+| 2 | `record_login`、`update_my_phone`、`password_changed` | 帳號 |
+| 3 | `mark_notices_read`、`set_notify_email` | 通知 |
+| 4 | `create_application` | 住民（同身分證字號不同資料 → 不建立，寫 `resident_conflicts`）＋案件＋文件＋核對項目＋申請確認通知＋操作紀錄；同一申請識別碼不重複建立 |
+| 4 | `sign_consent`、`withdraw_consent`、`decline_consent` | 個資同意；非本人簽署時加入代理權證明文件 |
+| 4 | `save_contacts`、`save_habit_section`、`submit_habit`、`resend_apply_mail` | 聯絡人、習慣卡、申請確認通知 |
+| 4 | `resolve_resident_conflict` | 行政處理住民資料不一致 |
+
+每個 RPC 都會先檢查身分與案件狀態，失敗就整筆不寫入。
+
+## 6. 實際檢查結果（2026/11/21，直接查詢雲端測試專案）
 
 - 35 張資料表、81 個外鍵；陣列欄位 0 個。
 - 編號類欄位沒有外鍵的只有：`audit_logs.actor`（刻意，見第 3 節）、`care_cards.v`、`document_versions.v`（版本號本身）、`org_settings.rev`（設定修改次數）、`mail_jobs.claim_by`（寄信程序識別碼，不是使用者）。
 - jsonb 欄位 11 個，全部是第 3 節列出的快照或表單內容。
 
-## 6. 讀取方式
+## 7. 讀取方式
 
 前端只能讀，資料列由 RLS 依角色過濾（`000002_rls.sql`、`000007` 的新表）。案件與文件的完整判斷資料由 `get_case_models()` 一次回傳（`000008`），函式內檢查權限，並對沒有權限看內容的文件只回傳狀態欄位。寫入一律走各階段的 RPC（一個交易內檢查權限、狀態並記錄操作紀錄）。

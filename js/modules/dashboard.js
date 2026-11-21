@@ -14,9 +14,10 @@
 import { bootPage } from '../page.js';
 import { supabase } from '../api/supabase.js';
 import { loadModel } from './services/model.js';
+import { openConflicts } from './services/conflicts.js';
 import { badgeCounts } from './services/badges.js';
-import { esc, pill, helpLine, toast, onSubmit, fieldErr, errText } from '../ui.js';
-import { isTestEnv } from '../config.js';
+import { esc, pill, helpLine, modal, toast, errText } from '../ui.js';
+import { accountCard, bindAccountCard } from './family-ui.js';
 import { TONE, PHASE_TONE, slash } from './rules/core.js';
 
 const P = (t, tone) => pill(t, tone || TONE[t] || 'mute');
@@ -36,7 +37,10 @@ bootPage('dashboard', async ({ main, me, view, params, shell, org }) => {
     if (view === 'mycases') return familyMyCases(ctx);
     return familyPersonal(ctx);
   }
-  if (me.role === 'staff' || me.role === 'nurse') return workHome(ctx);
+  if (me.role === 'staff' || me.role === 'nurse'){
+    if (me.role === 'staff') ctx.conflicts = await openConflicts();
+    return workHome(ctx);
+  }
 });
 
 /* ---------- 原型畫面代號 → 新版網址（HANDOFF 6.2）；從工作清單點進去帶 from=home，導覽列維持在「工作清單」 ---------- */
@@ -60,24 +64,6 @@ function goUrl(go, D, fromHome = true){
 const famApplyMain = () => `<section class="card hero stack" id="applyMain" aria-labelledby="applyMainH"><h2 id="applyMainH" style="margin:0">我要申請入住</h2><p style="margin:0">為自己或家人建立新的入住申請。</p><div><a class="btn primary big" href="application.html?view=apply">開始入住申請</a></div></section>`;
 const famSecondary = cur0 => `<nav class="fam-sec" id="famSecondary" aria-label="其他功能">${[['mycases', '我的申請紀錄', '查看所有申請的狀態與進度', 'dashboard.html?view=mycases'], ['guide', '申請流程說明', '流程、完整文件清單與後續準備項目', 'documents.html?view=list']].filter(([p]) => p !== cur0).map(([, t, d, href]) => `<a class="fam-sec-btn" href="${href}"><strong>${t}</strong><span class="small muted">${d}</span></a>`).join('')}</nav>`;
 const backHome = () => '<a class="back" href="dashboard.html">← 回到首頁</a>';
-
-/* 帳號與通知設定：Email 驗證狀態照實標示（測試環境沒有介接正式郵件服務），通知用 Email 可修改 */
-function accountCard(M){
-  const ev = isTestEnv() ? ['測試環境尚未介接', 'warn'] : ['尚未驗證', 'mute'];
-  return `<details class="card" id="accountCard"><summary><strong>帳號與通知設定</strong>　${pill('Email：' + ev[0], ev[1])}</summary>
-    <p class="small">登入帳號：${esc(M.email)}　手機：${esc(M.phone || '—')}</p>
-    <p class="small">電子郵件驗證：${pill(ev[0], ev[1])}<br><span class="muted">目前為測試環境，<strong>通知信尚未介接正式郵件服務</strong>（系統畫面上的寄送都是模擬），也不會顯示「已驗證」。電子郵件驗證只確認信箱可以收信，與個人資料同意書的法律效力無關。</span></p>
-    <form class="stack" id="notifyForm" novalidate><label class="f">通知用電子郵件<span class="hint">申請確認等通知會寄到這裡（未來介接郵件服務後）。和登入帳號相同時可以不改。</span><input type="email" name="notifyEmail" value="${esc(M.notifyEmail || M.email)}"></label><div class="err" id="nfErr" role="alert"></div><div><button type="submit" class="btn sm">儲存通知 Email</button></div></form></details>`;
-}
-function bindAccountCard(main, M){
-  const form = main.querySelector('#notifyForm'); if (!form) return;
-  onSubmit(form, async d => {
-    const v = String(d.get('notifyEmail') || '').trim(), err = main.querySelector('#nfErr');
-    const { data, error } = await supabase().rpc('set_notify_email', { p_email: v === M.email ? '' : v });
-    if (error){ fieldErr(form, 'notifyEmail', errText(error)); err.textContent = '儲存失敗：' + errText(error) + '。通知 Email 沒有變更。'; return; }
-    fieldErr(form, 'notifyEmail', ''); err.textContent = ''; M.notifyEmail = data || ''; toast('通知 Email 已儲存');
-  });
-}
 
 function familyPersonal({ R, M, org, main }){
   const list = R.myFamilyCases();
@@ -137,8 +123,9 @@ function workHome(ctx){
       <a class="tile ${famOd ? 'alert' : ''}" href="documents.html?view=followup&from=home"><div class="n">${fu.length}</div>項等家屬補件${famOd ? `（${famOd} 項逾期）` : ''} →</a>
     </div>`;
   }
-  main.innerHTML = head + caseFolders(ctx, t);
+  main.innerHTML = head + conflictsCard(ctx.conflicts) + caseFolders(ctx, t);
   bindFolders(ctx, () => workHome(ctx));
+  bindConflicts(ctx);
 }
 
 const fullLink = (c, M) => M.role === 'staff' ? `<a class="btn sm" href="cases.html?case=${c.id}&from=home">完整個案資料</a>` : c.nurseId === M.id ? `<a class="btn sm" href="assessment.html?case=${c.id}&from=home">完整住民資料</a>` : '<span class="small muted">已移交，只保留處理摘要</span>';
@@ -193,4 +180,28 @@ async function careHome(main){
   if (error) throw error;
   main.innerHTML = `<h1>我的住民</h1><p class="lead">只會列出護理師開放給您的住民。</p>
   <div class="card">${data.length ? `<ul class="tasks">${data.map(c => `<li class="task">${c.card_status === '已停用' ? pill('已停用', 'mute') : pill('第 ' + c.card_v + ' 版', 'info')}<div><div class="what">${esc(c.patient_name)}（${esc(c.call || '稱呼待確認')}）</div><div class="small muted">預計 ${slash(c.planned_admit || '')} 入住</div></div><a class="btn primary" href="care-summary.html?case=${c.case_id}">看摘要卡</a></li>`).join('')}</ul>` : '<div class="empty">目前沒有住民。護理師開放照顧摘要卡後，會出現在這裡。</div>'}</div>`;
+}
+
+/* ========== 行政：住民資料待確認（階段 4，使用者決定的流程；原型沒有） ==========
+ * 家屬送出申請時，身分證字號已有住民資料但姓名或生日不同 → 申請沒有建立，留在這裡給行政電話確認。 */
+function conflictsCard(list){
+  if (!list || !list.length) return '';
+  const fmt = iso => new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+  return `<div class="card hero warn stack" id="conflictCard" style="margin-bottom:12px"><h2 style="margin:0">住民資料待確認（${list.length}）</h2>
+    <p class="small" style="margin:0">家屬送出入住申請時，身分證字號已有住民資料但姓名或生日不同，<strong>申請沒有建立</strong>。請電話聯絡申請人確認後，填寫處理說明。</p>
+    <div class="tbl-wrap"><table><thead><tr><th>送出時間</th><th>申請人</th><th>申請時填寫</th><th>系統既有資料</th><th></th></tr></thead><tbody>${list.map(x => `<tr data-conflict="${x.id}">
+      <td class="small mono">${esc(fmt(x.created_at))}</td>
+      <td>${esc(x.family?.name || '')}<br><span class="small mono">${esc(x.family?.phone || '')}</span></td>
+      <td>${esc(x.submitted_name)}<br><span class="small">生日 ${slash(x.submitted_birth || '')}</span></td>
+      <td>${esc(x.residents?.name || '')}<br><span class="small">生日 ${slash(x.residents?.birth || '')}　<span class="mono">${esc(x.residents?.nid || '')}</span></span></td>
+      <td><button type="button" class="btn sm" data-resolve="${x.id}">標示已處理</button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function bindConflicts({ main }){
+  main.querySelectorAll('[data-resolve]').forEach(b => b.addEventListener('click', () => modal({ title: '標示已處理', ok: '儲存',
+    body: '<label class="f" data-req>處理說明<span class="hint">例：已電話確認，申請人身分證字號打錯，請他以正確資料重新送出</span><textarea id="cfNote"></textarea></label>',
+    onOk: async host => {
+      const { error } = await supabase().rpc('resolve_resident_conflict', { p_id: Number(b.dataset.resolve), p_resolution: host.querySelector('#cfNote').value });
+      if (error) return '儲存失敗：' + errText(error);
+      toast('已標示處理完成'); location.reload(); return '';
+    } })));
 }

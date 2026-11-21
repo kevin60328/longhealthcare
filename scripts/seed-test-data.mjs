@@ -50,7 +50,8 @@ for (const [k, a] of Object.entries(seed)){
 }
 
 /* ---------- 案件與文件 ---------- */
-const catalog = must(await db.from('doc_catalog').select('*').order('sort'), '讀取文件清單');
+/* 每案都有的文件（不含只在需要時加入的代理權證明） */
+const catalog = must(await db.from('doc_catalog').select('*').eq('on_demand', false).order('sort'), '讀取文件清單');
 const parts = must(await db.from('doc_catalog_parts').select('*'), '讀取文件核對項目');
 
 for (const [k, c] of Object.entries(seed)){

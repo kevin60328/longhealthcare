@@ -4,7 +4,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { as, anon, service } from './helpers.js';
 
 const nos = async (c, table = 'cases') => { const { data, error } = await c.from(table).select('no'); expect(error).toBeNull(); return data.map(r => r.no).sort(); };
-const count = async (c, table) => { const { data, error } = await c.from(table).select('id'); expect(error).toBeNull(); return data.length; };
+/* 筆數用 count 查詢（不讀出資料列，也不受每次最多回傳 1000 列的限制） */
+const count = async (c, table) => { const { count: n, error } = await c.from(table).select('id', { count: 'exact', head: true }); expect(error).toBeNull(); return n; };
 
 /* 建立暫時案件（測完呼叫 remove() 刪除，案件相關資料一併刪除）。nurse：指定承辦護理師（透過分配紀錄） */
 let tmpN = 0;
@@ -65,8 +66,10 @@ describe('案件隔離', () => {
 });
 
 describe('文件隔離', () => {
-  it('家屬只看到自己案件的文件（每案 24 份）', async () => { expect(await count(U.family, 'documents')).toBe(24 * expectNos(c => c.family_id === ID.family).length); });
-  it('行政看到所有案件的文件', async () => { expect(await count(U.staff, 'documents')).toBe(24 * Object.keys(ALL).length); });
+  /* 預期筆數用 service role 查（非本人簽署的案件會多一份代理權證明，所以不是固定 24 份） */
+  const docsOf = async filter => { const ids = Object.values(ALL).filter(filter).map(c => c.id); const { count: n } = await service().from('documents').select('id', { count: 'exact', head: true }).in('case_id', ids); return n; };
+  it('家屬只看到自己案件的文件', async () => { expect(await count(U.family, 'documents')).toBe(await docsOf(c => c.family_id === ID.family)); });
+  it('行政看到所有案件的文件', async () => { expect(await count(U.staff, 'documents')).toBe(await docsOf(() => true)); });
   it('管理員看得到案件（封存用）但看不到文件', async () => {
     expect(await nos(U.admin)).toEqual(expectNos(() => true));
     expect(await count(U.admin, 'documents')).toBe(0);
