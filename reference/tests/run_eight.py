@@ -1,0 +1,461 @@
+"""簡化版自動化測試：內建文件清單、取消規則版本與改套、兩種入住流程完整跑一次、補件退回、選填未上傳、條件式不需要、寫入失敗。"""
+import json, re, sys
+from playwright.sync_api import sync_playwright
+seed = json.load(open('/home/claude/simp/seed_s.json')); mock = open('/home/claude/test2/mock8.js').read()
+HTML = open('/home/claude/simp/index.html', encoding='utf-8').read()
+DL = json.load(open('/home/claude/simp/doclist.json'))
+errs, results = [], []
+def check(t, n, expect, ok, actual=''):
+    s = 'PASS' if ok is True else 'FAIL'
+    results.append({'id': t, 'case': n, 'expect': expect, 'result': s, 'actual': '' if ok is True else str(actual)[:300]}); print(s, t, n, '' if ok is True else str(actual)[:300]); sys.stdout.flush()
+A, B = 'C-0001-p4t8', 'C-0002-r6w3'
+EXAM_OCR = {'p_cbc': '報告內有', 'p_cbc_r': '文字判讀：在正常範圍', 'p_liver': '報告內有', 'p_liver_r': '文字判讀：正常', 'p_kidney': '報告內有', 'p_kidney_r': '文字判讀：正常', 'p_glu': '報告內有', 'p_glu_r': '血糖｜118｜mg/dL｜70–99｜H', 'p_lyte': '報告內有', 'p_lyte_r': '文字判讀：正常', 'p_urine': '報告內有', 'p_urine_r': '文字判讀：正常', 'p_infect': '報告內有', 'p_infect_r': '文字判讀：B、C 型肝炎陰性', 'p_other': '報告內有', 'p_other_r': '文字判讀：心電圖竇性心律', 'examNote': '文件未記載'}
+I = lambda k, c=A: f'{c}_{k}'
+IMG = lambda n: open('/home/claude/simp/img/' + n + '.png', 'rb').read()
+with sync_playwright() as p:
+    b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 1280, 'height': 900})
+    ctx.add_init_script('window.__SEED=' + json.dumps(seed, ensure_ascii=False) + ';' + mock)
+    ctx.route('**/fonts.g*/**', lambda r: r.abort())
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errs.append(str(e))); pg.on('console', lambda m: m.type == 'error' and 'ERR_FAILED' not in m.text and errs.append(m.text))
+    pg.goto('file:///home/claude/simp/index.html'); pg.wait_for_selector('#portal, #loginForm')
+    W = lambda ms=500: pg.wait_for_timeout(ms); E = lambda js: pg.evaluate(js)
+    store = lambda path: E(f"(() => {{ const d = window.__store.get('{path}'); return d ? JSON.parse(JSON.stringify(d)) : null; }})()")
+    keys = lambda pre: E(f"[...window.__store.keys()].filter(k => k.startsWith('{pre}'))")
+    toasts = lambda: pg.inner_text('#toasts'); clr = lambda: E("document.getElementById('toasts').innerHTML = ''")
+    main = lambda: pg.inner_text('main')
+    fail = lambda pre: E(f"window.__failWrite = {json.dumps(pre)}")
+    st = lambda k, c=A: E(f"status(D.items['{I(k, c)}'], D.cases['{c}'])")
+    ph = lambda c=A: E(f"phase(D.cases['{c}'])")
+    bar = lambda: pg.inner_text('#outboxBar') if pg.query_selector('#outboxBar:not([hidden])') else ''
+    who = {'u': None}
+    CUR = [None]
+    def assign(c, n):
+        prev = CUR[0]; login('nurse@example.com'); pg.evaluate("go('assign')"); pg.wait_for_timeout(300); pg.click(f'[data-act="assign-nurse"][data-case="{c}"]'); pg.wait_for_timeout(200); pg.select_option('#asNurse', n); pg.click('[data-act="modal-ok"]'); pg.wait_for_timeout(1500); login(prev)
+    def login(e):
+        CUR[0] = e
+        who['u'] = e
+        if pg.query_selector('[data-act="logout"]'): pg.click('[data-act="logout"]'); W(300); pg.wait_for_selector('#portal, #loginForm')
+        pg.evaluate("go('login', '%s')" % ('applicant' if e.startswith('family') else 'staff')); pg.wait_for_selector('#loginForm'); pg.fill('#loginForm [name=email]', e); pg.fill('#loginForm [name=pw]', 'Test1234'); pg.click('#loginForm button[type=submit]'); pg.wait_for_selector('#top [data-act="logout"]', timeout=15000); W(400); pg.evaluate("me && me.role === 'family' && myFamilyCases().length && go('home', myFamilyCases()[0].id)"); pg.wait_for_timeout(200)
+    def to_guide():
+        cid = E("(route.page === 'guide' && route.arg) ? route.arg : ((route.arg && D.cases[route.arg]) ? route.arg : ((typeof myFamilyCases === 'function' && myFamilyCases()[0]) || {}).id || null)")
+        if E("route.page") != 'guide' or E("route.arg") != cid: E(f"go('guide', {json.dumps(cid)})"); pg.wait_for_timeout(300)
+
+    def hab_submit(c):
+        """家屬在畫面上補齊習慣卡必填欄位並正式提交（八大項）"""
+        for sec in ['0', '1', '2']:
+            nav('life', c, sec)
+            E("""(() => { const f = document.getElementById('habitForm'); if (!f) return;
+              const t = (n, v) => { const el = f.querySelector(`[name=${n}]`); if (el && !el.value.trim()) el.value = v; };
+              t('call', '測試稱呼'); t('famAllergy', '無');
+              const hs = f.querySelector('select[name=hearing]'); if (hs && !hs.value) hs.value = '不清楚';
+              if (f.querySelector('input[name=lang]') && !f.querySelector('input[name=lang]:checked') && !(f.querySelector('[name=langOther]') || {}).value) f.querySelector('input[name=lang][value="國語"]').checked = true;
+              [...new Set([...f.querySelectorAll('input[type=radio][name^=adl_]')].map(x => x.name))].forEach(n => { if (!f.querySelector(`input[name=${n}]:checked`)) f.querySelector(`input[name=${n}][value="不清楚"]`).checked = true; }); })()""")
+            pg.click('#habitForm button[value="stay"]'); pg.wait_for_timeout(700)
+        pg.click('[data-act="habit-submit"]'); pg.wait_for_timeout(1200)
+
+    def nav(page_, arg=None, arg2=None):
+        E(f"route.page={json.dumps(page_)}; route.arg={json.dumps(arg)}; route.arg2={json.dumps(arg2)}; reviewState=null; render(true)"); W(300)
+    def need(c, key, val, note):
+        if key in ('tubeCare', 'woundCare', 'swallow'):
+            back_to = who['u']; login(E(f"D.cases['{c}'].nurseId")); nav('resident', c)
+            pg.click(f'[data-act="need-edit"][data-item="{I(key, c)}"]'); W(200); pg.check(f'input[name=needSel][value="{val}"]'); pg.fill('#needNote', note); pg.click('[data-act="modal-ok"]'); W(900)
+            login(back_to); return
+        nav('case', c); pg.click(f'[data-act="need-edit"][data-item="{I(key, c)}"]'); W(200); pg.check(f'input[name=needSel][value="{val}"]'); pg.fill('#needNote', note); pg.click('[data-act="modal-ok"]'); W(900)
+    def upload(c, key, img, date=None, expect_ok=True):
+        nav('upload', c, I(key, c)); pg.set_input_files('#file', {'name': img + '.png', 'mimeType': 'image/png', 'buffer': IMG(img)})
+        if date and pg.query_selector('#examDate'): pg.fill('#examDate', date)
+        pg.click('#uploadForm button[type=submit]')
+        if expect_ok: pg.wait_for_function("route.page === 'uploaded'", timeout=15000)
+        W(400)
+    def receipt(c, key, birth, nid=True, signer=None):
+        nav('receipt', I(key, c))
+        if pg.query_selector('#signerForm'):
+            pg.fill('#signerForm [name=signerName]', signer); pg.check('#signerForm [name=signerOk]'); pg.check('#signerForm [name=content]')
+            pg.click('#signerForm button[type=submit]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(400); return
+        pg.select_option('#receiptForm [name=m-name]', '相符')
+        if pg.query_selector('#receiptForm [name=m-nid]'): pg.select_option('#receiptForm [name=m-nid]', '相符' if nid else '沒有')
+        if pg.query_selector('#birthRaw'):
+            if birth is None: pg.check('#birthNone')
+            else: pg.fill('#birthRaw', birth)
+        W(150)
+        if not pg.is_hidden('#manualBox'): pg.check('#manualBox input[name=how] >> nth=0')
+        if pg.query_selector('#receiptForm [name=content]'): pg.check('#receiptForm [name=content]')
+        pg.click('#receiptForm button[type=submit]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(400)
+    def datec(c, key, d):
+        nav('date', I(key, c)); pg.fill('#dateVal', d); pg.click('[data-act="date-confirm"]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(400)
+    def review(c, key, ocr=None, fill=None):
+        nav('review', I(key, c))
+        if ocr is not None: E(f"window.__ocrNext = {json.dumps(ocr, ensure_ascii=False)}"); pg.click('#ocrBtn'); W(1500)
+        for i, v in (fill or {}).items(): pg.fill(f'#fv-{i}', v)
+        for _ in range(80):
+            if not pg.query_selector("[data-act=\"f-ok\"], [data-act=\"dxr-ok\"], #dxField:not(:has(tr.dxr)) [data-act=\"dxr-fromraw\"], #dxField:not(:has(tr.dxr)) [data-act=\"f-quick\"]"): break
+            pg.click("[data-act=\"f-ok\"], [data-act=\"dxr-ok\"], #dxField:not(:has(tr.dxr)) [data-act=\"dxr-fromraw\"], #dxField:not(:has(tr.dxr)) [data-act=\"f-quick\"] >> nth=0"); W(60)
+        pg.click('[data-act="review-done"]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(400)
+    def confirm_apply(c, nurse):
+        nav('apply', c); pg.check('[name=called]'); pg.click('#applyConfirm button[type=submit]'); W(2500); assign(c, nurse)
+    def consent(c):
+        nav('consent', c); pg.check('input[name=signer][value="本人"]'); pg.check('[name=agree]'); pg.check('[name=emergency]'); pg.fill('#consentForm [name=signerName]', '測試簽署人'); pg.click('#consentForm button[type=submit]'); W(1500)
+    def signed(c):
+        nav('case', c); pg.click('main [data-act="signed"]'); W(300)
+        if pg.query_selector('[data-act="modal-ok"]'): pg.click('[data-act="modal-ok"]')
+        W(1500)
+
+    def logout():
+        if pg.query_selector('[data-act="logout"]'): pg.click('[data-act="logout"]'); W(300); pg.wait_for_selector('#portal, #loginForm')
+    steps = lambda c: E(f"stepsInfo(D.cases['{c}']).map(x => [x.name, x.state, x.date, x.note])")
+    d10 = lambda at: (at or '')[:10]
+    stars = lambda sel: E(f"[...document.querySelectorAll('{sel} .req.auto')].map(x => (x.closest('label, fieldset legend, th') || x.parentElement).textContent.replace(/\\s+/g, ' ').trim().slice(0, 14))")
+    nurse_txt = []
+    def hr_ok(c, note='已確認習慣卡內容'):
+        nav('resident', c); W(200)
+        n = 0
+        while pg.query_selector(f'#hrRes-{n}'): pg.fill(f'#hrRes-{n}', '已電話向家屬確認，以醫院紀錄為準'); n += 1
+        pg.fill('#hrNote', note); clr(); pg.click(f'[data-act="habit-review"][data-case="{c}"][data-state="審核完成"]'); W(1300)
+
+    # ================= S0 靜態檢查：已移除的規則版本與改套 =================
+    gone = ['startRuleMigration', 'runRuleMigration', 'rulePlan', 'RULE_TEMPLATE', 'ruleMigration', 'ruleArchive', 'tpl-load', 'rule-apply', 'retiredOf', 'retiredField', 'histUsed', 'CASE_SPECIFIC', 'migrating(', 'ruleVer', '改套', '繼續改套']
+    left = [g for g in gone if g in HTML]
+    check('S0-1', '程式碼搜尋已移除的規則版本／改套識別字（靜態檢查）', '全部不存在：' + '、'.join(gone), not left, left)
+    check('S0-2', '內建文件清單內容（靜態檢查）', f'DOC_LIST 共 24 項、涵蓋 A–F 類；檢查效期註明示範機構參考設定', len(DL) == 24 and sorted(set(r['cat'] for r in DL)) == list('ABCDEF') and '示範機構的參考設定' in HTML, len(DL))
+    check('S0-3', '頁尾模擬環境標示（靜態檢查）', '文字完全相同', '目前為模擬環境：資料尚未正式介接 Supabase 與 HAPI FHIR。' in HTML)
+
+    # ================= M 系統管理員 =================
+    login('admin@example.com'); nav('settings'); t = main()
+    check('M1', '機構設定頁沒有文件規則版本、範本、改套', '沒有「文件規則（目前第」「載入」「儲存為新版本」「新增文件類型」；有「內建入住文件清單」（唯讀）', all(x not in t for x in ['文件規則（目前第', '載入機構範例', '儲存為新版本', '新增文件類型']) and '內建入住文件清單' in pg.text_content('main') and not pg.query_selector('#docListRef select, #docListRef input'), t[:200])
+    pg.fill('#settingsForm [name=phone]', '(07) 765-4321'); pg.click('#settingsForm button[type=submit]'); W(1000); o = store('settings/org')
+    check('M2', '儲存系統基本設定', '電話更新、設定修訂號 +1、沒有 rules／ruleVer 欄位', o['phone'] == '(07) 765-4321' and o.get('rev') == 2 and 'rules' not in o and 'ruleVer' not in o, o)
+    nav('accounts'); pg.click('[data-act="acc-approve"] >> nth=0'); W(200); pg.click('[data-act="modal-ok"]'); W(900)
+    check('M3', '帳號審核：核准待審核人員', '第一位待審核人員變成「啟用」', sum(1 for k in keys('accounts/') if store(k)['status'] == '啟用' and k.split('/')[1] in ('jiaying@example.com', 'zhihao@example.com')) == 1)
+    check('M4', '使用權限管理介面仍在', '機構設定頁有「資料存取與權限」說明，標示尚未實作資料庫端權限', (nav('settings') or True) and pg.query_selector('#accessCard') is not None and '畫面' in pg.inner_text('#accessCard'))
+
+
+    # ================= G 必填星號與手機號碼 =================
+    logout(); E("go('login', 'applicant')"); W(300)
+    check('G1', '登入頁必填標示', '電子郵件、密碼有紅色半形 *，並顯示「* 為必填欄位」', len(stars('#loginForm')) == 2 and '* 為必填欄位' in pg.inner_text('#loginForm') and '＊' not in pg.inner_text('#loginForm'), stars('#loginForm'))
+    E("go('register', 'applicant')"); W(300); sa = stars('#regForm')
+    col = E("getComputedStyle(document.querySelector('#regForm .req.auto')).color"); bad = E("getComputedStyle(document.documentElement).getPropertyValue('--bad').trim()")
+    lab = E("getComputedStyle(document.querySelector('#regForm label.f')).color")
+    check('G2', '一般申請人註冊：姓名、電子郵件、手機號碼、密碼、確認密碼都有紅色半形 *', '5 個星號；星號是 --bad 紅色、欄位名稱不是紅色；控制項有 aria-required', len(sa) == 5 and all(any(x.startswith(k) for x in sa) for k in ['姓名', '電子郵件', '手機號碼', '密碼', '確認密碼']) and col != lab and E("[...document.querySelectorAll('#regForm [aria-required=true]')].length") == 5, (sa, col, lab, bad))
+    for k, v in [('name', '王小明'), ('email', 'newfam@example.com'), ('pw', 'Test1234'), ('pw2', 'Test1234')]: pg.fill(f'#regForm [name={k}]', v)
+    pg.click('#regForm button[type=submit]'); W(500); e1 = pg.inner_text('#fe-regForm-phone') if pg.query_selector('#fe-regForm-phone') else ''
+    kept = [pg.input_value(f'#regForm [name={k}]') for k in ['name', 'email', 'pw']]
+    check('G3', '手機號碼空白不能註冊', '欄位旁顯示「請輸入手機號碼」；其他已填資料保留；沒有建立帳號', e1 == '請輸入手機號碼' and kept == ['王小明', 'newfam@example.com', 'Test1234'] and store('accounts/newfam@example.com') is None, (e1, kept))
+    bads = {}
+    for v in ['abcd', '0812-345-678', '0912-34-567', '09123456789']:
+        pg.fill('#regForm [name=phone]', v); pg.click('#regForm button[type=submit]'); W(400); bads[v] = pg.inner_text('#fe-regForm-phone') if pg.query_selector('#fe-regForm-phone') else ''
+    check('G4', '手機號碼格式錯誤不能註冊', '英文字母、不是 09 開頭、位數不對都顯示「請輸入正確的手機號碼，例如 0912-345-678」；沒有建立帳號；姓名仍保留', all(x == '請輸入正確的手機號碼，例如 0912-345-678' for x in bads.values()) and store('accounts/newfam@example.com') is None and pg.input_value('#regForm [name=name]') == '王小明', bads)
+    pg.fill('#regForm [name=phone]', '0912 345 678'); pg.click('#regForm button[type=submit]'); pg.wait_for_selector('#top [data-act="logout"]', timeout=15000); W(600)
+    na = store('accounts/newfam@example.com')
+    check('G5', '正確手機號碼可以註冊，並統一格式', '輸入「0912 345 678」，帳號建立，儲存為 0912-345-678；註冊後到個人首頁、沒有建立入住申請', na and na['phone'] == '0912-345-678' and E("route.page") == 'home' and not any(store(k)['familyId'] == 'newfam@example.com' for k in keys('cases/')), na and na.get('phone'))
+    logout(); E("go('register', 'staff')"); W(300); ss = stars('#regForm')
+    check('G6', '機構人員帳號申請：申請的角色、姓名、電子郵件、手機號碼、密碼、確認密碼都有 *', '6 個星號；角色預設「請選擇」', len(ss) == 6 and ss[0].startswith('申請的角色') and pg.input_value('#regForm [name=want]') == '', ss)
+    for k, v in [('name', '林新進'), ('email', 'newstaff@example.com'), ('phone', '0911-222-333'), ('pw', 'Test1234'), ('pw2', 'Test1234')]: pg.fill(f'#regForm [name={k}]', v)
+    pg.click('#regForm button[type=submit]'); W(500); er = pg.inner_text('#fe-regForm-want') if pg.query_selector('#fe-regForm-want') else ''
+    pg.select_option('#regForm [name=want]', 'nurse'); pg.fill('#regForm [name=phone]', ''); pg.click('#regForm button[type=submit]'); W(400); ep = pg.inner_text('#fe-regForm-phone') if pg.query_selector('#fe-regForm-phone') else ''
+    pg.fill('#regForm [name=phone]', '0911222333'); pg.click('#regForm button[type=submit]'); pg.wait_for_selector('#top [data-act="logout"]', timeout=15000); W(500); ns = store('accounts/newstaff@example.com')
+    check('G7', '機構人員也必須填手機號碼', '沒選角色、手機空白都被擋下；補齊後送出，待審核帳號的手機為 0911-222-333', er == '請選擇申請的角色' and ep == '請輸入手機號碼' and ns and ns['phone'] == '0911-222-333' and ns['status'] == '待審核', (er, ep, ns and ns.get('phone')))
+    logout()
+    E("(async () => { const a = JSON.parse(JSON.stringify(window.__store.get('accounts/family3@example.com'))); a.phone = ''; await db.doc('accounts/family3@example.com').set(a); })()"); W(500)
+    login('family3@example.com'); ban = pg.query_selector('#phoneFill') is not None
+    pg.fill('#phoneForm [name=phone]', '12345'); pg.click('#phoneForm button[type=submit]'); W(500); pe = pg.inner_text('#pfErr')
+    pg.fill('#phoneForm [name=phone]', '0933500333'); pg.click('#phoneForm button[type=submit]'); W(900)
+    check('G8', '舊帳號沒有手機號碼：登入後提示補填', '帳號沒有被停用，登入後出現補填提示；格式錯誤被擋下；正確後儲存為 0933-500-333，提示消失', ban and '正確的手機號碼' in pe and store('accounts/family3@example.com')['phone'] == '0933-500-333' and pg.query_selector('#phoneFill') is None, (ban, pe))
+
+    # ================= D 個人首頁、C 一般參考清單 =================
+    n_cases = len(keys('cases/')); login('family3@example.com'); E("go('home')"); W(400)
+    am = pg.inner_text('#applyMain') if pg.query_selector('#applyMain') else ''; sec2 = pg.inner_text('#famSecondary') if pg.query_selector('#famSecondary') else ''
+    check('D1', '「我要申請入住」獨立顯示', '主要申請區：標題「我要申請入住」、說明「為自己或家人建立新的入住申請。」、主要按鈕「開始入住申請」；我的申請紀錄與申請流程說明在次要功能區', '我要申請入住' in am and '為自己或家人建立新的入住申請。' in am and E("document.querySelector('#applyMain [data-act=want-apply]').classList.contains('primary')") and '開始入住申請' in am and '我的申請紀錄' in sec2 and '申請流程說明' in sec2 and '開始入住申請' not in sec2 and not pg.query_selector('#famActions [data-act=want-apply]'), (am, sec2))
+    check('D2', '登入或進入首頁不會建立申請', '登入後案件數不變', len(keys('cases/')) == n_cases)
+    pg.set_viewport_size({'width': 390, 'height': 800}); W(300)
+    geo = E("(() => { const b = [...document.querySelectorAll('#famSecondary .fam-sec-btn')].map(x => x.getBoundingClientRect()); return {stack: b[1].top >= b[0].bottom - 1, ovf: document.documentElement.scrollWidth > document.documentElement.clientWidth}; })()")
+    pg.set_viewport_size({'width': 1280, 'height': 900}); W(200)
+    geo2 = E("(() => { const b = [...document.querySelectorAll('#famSecondary .fam-sec-btn')].map(x => x.getBoundingClientRect()); return {side: Math.abs(b[1].top - b[0].top) < 2, ovf: document.documentElement.scrollWidth > document.documentElement.clientWidth}; })()")
+    check('D3', '手機與電腦版排版', '390px 寬時次要功能上下排列、沒有水平捲動；電腦版左右並排', geo['stack'] and not geo['ovf'] and geo2['side'] and not geo2['ovf'], (geo, geo2))
+    pg.click('#famSecondary [data-page="guide"]'); W(400); g = pg.text_content('#fullDocList'); nb = E("document.querySelectorAll('#fullDocList button').length")
+    check('C1', '尚未申請：申請流程說明可看一般參考清單（唯讀）', '「完整文件清單與後續準備項目」在申請流程說明；七大類、必備／條件式必備／選填、評估前／入住前、取得方式、準備說明、有效期限；另列習慣卡（必填、線上填寫）；沒有任何按鈕', all(x in g for x in ['A. 身分與聯絡資料', 'C. 醫療資料', 'F. 契約與費用', '條件式必備', '選填', '入住前（簽約後）', '取得方式', '準備說明', '天內', '住民生活與照護習慣卡（必填）', '線上填寫']) and nb == 0, (nb, g[:200]))
+    E("go('home')"); W(300); pg.click('#applyMain [data-act="want-apply"]'); W(400)
+    check('D4', '按「開始入住申請」才進入申請表', '進入入住申請表', E("route.page") == 'apply' and pg.query_selector('#applyForm') is not None)
+    sp = stars('#applyForm'); pg.click('#applyForm button[type=submit]'); W(300); ae = pg.inner_text('#applyErr')
+    check('G9', '入住申請表必填標示與驗證一致', '姓名、身分證字號、出生日期、關係、預計入住日期 5 個 *；醫院（選填）沒有 *；空白送出被擋下', len(sp) == 5 and not any('醫院' in x for x in sp) and '請填寫預計入住者姓名' in ae, (sp, ae))
+    # ================= F 家屬：建立新申請 → 自動產生完整清單 =================
+    login('family3@example.com'); nav('apply')
+    pg.fill('#applyForm [name=pname]', '劉春梅'); pg.fill('#applyForm [name=nid]', 'K287654321'); pg.fill('#applyForm [name=birth]', '1943-02-03'); pg.select_option('#applyForm [name=relation]', '兒子'); pg.fill('#applyForm [name=admit]', '2026-12-10')
+    pg.click('#applyForm button[type=submit]'); W(500); pg.click('#applyPreviewForm button[type=submit]'); W(3000)
+    cid = [k.split('/')[1] for k in keys('cases/') if store(k)['patient']['name'] == '劉春梅'][0]
+    nav('home', cid)
+    its = [k for k in keys('items/') if k.startswith('items/' + cid + '_')]
+    c3 = store('cases/' + cid)
+    check('F1', '家屬建立新入住申請', '案件建立、編號 C-0003；系統自動建立 24 份文件項目；清單狀態「完成」', len(its) == 24 and c3['docList']['status'] == '完成' and c3['no'] == 'C-0003', (len(its), c3.get('docList'), c3.get('no')))
+    to_guide(); t = pg.text_content('main')
+    cats = re.findall(r'([A-G])\. (身分與聯絡資料|入住前健康檢查資料|醫療資料|特殊照護資料|授權與法律文件|契約與費用)', t)
+    check('F2', '家屬首頁立即看到「入住文件準備清單」', '顯示清單標題與 A–F 六大類（G 類由行政個案新增時才出現）；有需要繳交／視情況繳交／選填三種標示', '入住文件準備清單' in t and len(set(c for c, _ in cats)) == 6 and all(x in t for x in ['需要繳交', '視情況繳交', '選填']), (sorted(set(cats)), t[:120]))
+    check('F3', '尚未確認申請與授權前不能上傳', '清單沒有上傳按鈕，提示簽署後才能上傳；不顯示「版」「改套」', not pg.query_selector('#docList [data-act="fgo"][data-page="upload"]') and '簽署資料授權同意書後，就可以開始上傳' in t and '改套' not in t and '規則' not in t)
+    check('F4', '簽約後才要的文件', '入住契約、繳費收據等標示「簽約後再準備」，不在目前要做的事', '簽約後再準備' in t)
+    # 文件清單建立中途失敗
+    nav('apply'); pg.fill('#applyForm [name=pname]', '劉阿福'); pg.fill('#applyForm [name=nid]', 'K187654322'); pg.fill('#applyForm [name=birth]', '1941-05-05'); pg.fill('#applyForm [name=admit]', '2026-12-20')
+    E("window.__failAfter = 0; (() => { const s = window.__store, orig = s.set.bind(s); let n = 0; s.set = (k, v) => { if (k.startsWith('items/') && ++n > 5) throw {code:'unavailable'}; return orig(k, v); }; window.__restoreSet = () => { s.set = orig; }; })()")
+    pg.click('#applyForm button[type=submit]'); W(500); pg.click('#applyPreviewForm button[type=submit]'); W(3000); E("window.__restoreSet()")
+    cid4 = [k.split('/')[1] for k in keys('cases/') if store(k)['patient']['name'] == '劉阿福'][0]
+    c4 = store('cases/' + cid4); n4 = len([k for k in keys('items/') if k.startswith('items/' + cid4 + '_')])
+    check('W1', '資料寫入失敗：建立文件清單時第 6 份寫入失敗', '案件標記「未完成」（記錄失敗文件與已建立份數）；只有 5 份文件', c4['docList']['status'] == '未完成' and n4 == 5 and c4['docList']['lastError']['done'] == 5, (c4.get('docList'), n4))
+    nav('home', cid4); t = main()
+    check('W2', '清單不完整時家屬端', '顯示「文件清單準備中」與重新整理按鈕，不顯示「入住文件準備清單」為完整', '文件清單準備中' in t and pg.query_selector('[data-act="list-build"]') is not None, t[:150])
+    E(f"(async () => {{ const c = JSON.parse(JSON.stringify(window.__store.get('cases/{cid4}'))); c.linkStatus = '已確認'; c.consent = {{signer:'本人', at:'x', ver:1, by:'family3@example.com'}}; await db.doc('cases/{cid4}').set(c); }})()"); W(800)
+    check('W3', '清單不完整時不會誤判文件齊全', '即使 5 份文件都不需要上傳，案件也不會進入「評估中」；評估與摘要卡檢查都擋下', ph(cid4) != '評估中' and E(f"listOk(D.cases['{cid4}'])") is False and 'string' == E(f"(me = D.accounts['nurse@example.com'], typeof assessGuard(Object.assign({{}}, D.cases['{cid4}'], {{nurseId:'nurse@example.com'}})))") and E(f"cardAllowed(D.cases['{cid4}'])") is False, ph(cid4))
+    E("me = D.accounts['family3@example.com']")
+    nav('home', cid4); pg.click('[data-act="list-build"]'); W(2500)
+    c4 = store('cases/' + cid4); n4 = len([k for k in keys('items/') if k.startswith('items/' + cid4 + '_')])
+    check('W4', '按「重新整理文件清單」重試', '只補建缺少的 19 份、不重複建立；清單狀態「完成」', c4['docList']['status'] == '完成' and n4 == 24, (c4.get('docList'), n4))
+    # 空清單防呆
+    E("(async () => { await db.doc('cases/C-9999-zzzz').set({no:'C-9999', familyId:'family3@example.com', relation:'兒子', patient:{name:'測試空清單', nid:'K100000001', birth:'1940-01-01'}, plannedAdmit:'2026-12-30', flowMode:'先審後簽', docList:{status:'完成'}, linkStatus:'已確認', consent:{signer:'本人', at:'x', ver:1}, assessment:null, signedAt:null, card:null, closed:null}); })()"); W(800)
+    check('W5', '文件清單為空的案件（防呆）', '不算文件齊全：不進入評估中、不能評估、不能產生摘要卡', ph('C-9999-zzzz') != '評估中' and E("listOk(D.cases['C-9999-zzzz'])") is False and E("cardAllowed(D.cases['C-9999-zzzz'])") is False, ph('C-9999-zzzz'))
+    E("(async () => { await db.doc('cases/C-9999-zzzz').delete(); })()"); W(500)
+
+    # ================= 先審後簽：張秀英 =================
+    login('staff@example.com'); confirm_apply(A, 'nurse@example.com')
+    check('S1', '行政確認申請', '已確認、指定黃護理師；文件清單沿用申請時建立的 24 份（不重建）；家屬收到通知', store('cases/' + A)['linkStatus'] == '已確認' and len([k for k in keys('items/') if k.startswith('items/' + A + '_')]) == 24 and any(store(k)['caseId'] == A for k in keys('notices/')))
+    login('family@example.com'); consent(A)
+    check('S2', '家屬簽署資料授權（沿用線上簽署）', '授權有效；個資同意列在 E 類為線上簽署，沒有另外的上傳項目', E(f"consentOk(D.cases['{A}'])") and '個人資料蒐集、處理及利用同意書（線上簽署）' in (to_guide() or pg.text_content('#docList')) and not any('個人資料' in store(k)['name'] for k in keys('items/' + A)))
+    login('family@example.com'); nav('home', A); s1 = steps(A); ca = store('cases/' + A)['consent']
+    check('A1', '資料授權完成日期', '「資料授權：已完成｜同意日期」；上傳文件進行中；後面三個階段尚未開始、不顯示日期', s1[0][1:3] == ['已完成', d10(ca['at'])] and s1[1][1] == '進行中' and all(x[1] == '尚未開始' and x[2] == '' for x in s1[2:]), s1)
+    sbar = pg.inner_text('#stepsBar')
+    check('A2', '進度列在節點名稱下方顯示狀態與日期', '第一個節點下方顯示「已完成｜日期」', f"已完成｜{d10(ca['at'])}" in sbar, sbar)
+    ht = pg.inner_text('#todoHero') if pg.query_selector('#todoHero') else ''
+    check('B1', '第一階段「目前需要處理」列出必填習慣卡', '目前要做的事包含「住民生活與照護習慣卡（必填）」與「開始填寫」；沒有另一張重複的習慣卡卡片', '住民生活與照護習慣卡（必填）' in ht and '開始填寫' in ht and pg.query_selector('#habitCard') is None, ht[:200])
+    check('C2', '案件首頁不再展開七大類完整清單', '沒有完整清單區塊，只留到「申請流程說明」查看的連結', pg.query_selector('#docList') is None and pg.query_selector('#fullList') is None and pg.query_selector('#fullListLink') is not None)
+    check('D5', '案件詳情不重複顯示主要申請區', '案件頁沒有「開始入住申請」主要申請區，保留回到個人首頁', pg.query_selector('#applyMain') is None and '回到個人首頁' in main())
+    nav('contacts', A); pg.fill('#contactForm [name=name0]', '張家豪'); pg.fill('#contactForm [name=rel0]', '兒子'); pg.fill('#contactForm [name=phone0]', '0912-300-111'); pg.click('#contactForm button[type=submit]'); W(800)
+    nav('contacts', A); sc = stars('#contactForm')
+    check('G10', '條件式／選填欄位不誤標', '緊急聯絡人只有主要聯絡人的姓名、電話有 *；關係與第二聯絡人沒有', len(sc) == 2, sc)
+    # 條件式判斷
+    login('staff@example.com'); nav('case', A); t = main()
+    btns = E("[...document.querySelectorAll('main [data-act=need-edit]')].map(b => b.dataset.item.split('_').pop())")
+    check('S3', '行政只判斷非照護類的視情況文件', '只有戶籍或代理關係證明有判斷按鈕（管路、傷口、吞嚥改由護理判斷）；沒有改套或版本提示', btns == ['relProof'] and '改套' not in t and '版文件規則' not in t, btns)
+    tasks0 = E(f"tasks().filter(t => t.tag === '要求' && t.c.id === '{A}').length")
+    check('S4', '行政工作清單不再列管路、傷口、吞嚥的判斷', '0 筆（戶籍證明屬簽約後階段）', tasks0 == 0, tasks0)
+    pg.click(f'[data-act="need-edit"][data-item="{I("relProof")}"]'); W(200)
+    opts = E("[...document.querySelectorAll('input[name=needSel]')].map(x => x.closest('label').querySelector('strong').textContent)")
+    check('S5', '判斷視窗只有三個選項', '本案需要／本案不需要／尚未確認', opts == ['本案需要', '本案不需要', '尚未確認'], opts)
+    pg.click('[data-act="modal-cancel"]') if pg.query_selector('[data-act="modal-cancel"]') else None; W(200)
+    need(A, 'tubeCare', 'yes', '出院摘要記載鼻胃管'); need(A, 'swallow', 'yes', '吞嚥評估建議管灌'); need(A, 'woundCare', 'no', '出院摘要記載無傷口'); need(A, 'relProof', 'yes', '由兒子簽約')
+    it = store('items/' + I('woundCare'))
+    check('S6', '條件式文件「本案不需要」', '狀態「不需要」、記錄判斷者（負責護理師）、時間與原因', st('woundCare') == '不需要' and it['needSetBy'] == 'nurse@example.com' and it['needNote'] == '出院摘要記載無傷口' and it['needHist'][-1]['to'] == '護理已確認：不需要', it.get('needHist'))
+    # 家屬上傳
+    login('family@example.com'); to_guide(); E("document.querySelectorAll('#docList details').forEach(d => d.open = true)"); t = (to_guide() or pg.text_content('#docList'))
+    row = E(f"(() => {{ const r = [...document.querySelectorAll('#docList .drow')].find(x => x.querySelector('.t-name').textContent === '傷口照護資料'); return r ? r.textContent : ''; }})()")
+    check('S7', '家屬端顯示條件式判斷結果', '傷口照護資料顯示「本案不需繳交」、沒有上傳按鈕', '本案不需繳交' in row and '上傳' not in row.replace('上傳：', ''), row[:100])
+    todo0 = E(f"activeItems(D.cases['{A}']).filter(i => familyTodo(i, D.cases['{A}'])).map(i => i.key).sort()")
+    check('S8', '家屬「目前要做的事」只列需要的評估前文件', '長輩身分證明、健保卡、出院摘要、用藥、管路、吞嚥（6 份）；選填與入住前文件不列入', todo0 == sorted(['idcopy', 'nhi', 'summary', 'meds', 'tubeCare', 'swallow']), todo0)
+    # 寫入失敗：上傳
+    nav('upload', A, I('idcopy')); pg.set_input_files('#file', {'name': 'a.png', 'mimeType': 'image/png', 'buffer': IMG('01_身分證影本_張秀英')}); fail('items/'); pg.click('#uploadForm button[type=submit]'); W(1500); fail(None)
+    check('W6', '資料寫入失敗：上傳時文件寫入失敗', '顯示「上傳失敗…檔案已保留」；沒有新增版本；按「送出」重試成功', '上傳失敗' in pg.inner_text('#upErr') and not store('items/' + I('idcopy'))['versions'], pg.inner_text('#upErr'))
+    pg.click('#uploadForm button[type=submit]'); pg.wait_for_function("route.page === 'uploaded'", timeout=15000); W(300)
+    check('W7', '重試上傳', '第 1 版建立，只有一個版本', len(store('items/' + I('idcopy'))['versions']) == 1)
+    upload(A, 'nhi', '02_健保卡_張秀英'); upload(A, 'summary', '03_出院病歷摘要_張秀英'); upload(A, 'meds', '05_用藥清單_不清楚_張秀英'); upload(A, 'tubeCare', '06_管路照護指導_張秀英'); upload(A, 'swallow', '07_吞嚥評估_張秀英')
+    check('F5', '家屬上傳文件', '6 份評估前文件都是第 1 版、狀態「待收件」；選填文件未上傳', all(st(k) == '待收件' for k in ['idcopy', 'nhi', 'summary', 'meds', 'tubeCare', 'swallow']) and not store('items/' + I('diag'))['versions'])
+    # 習慣卡：填寫部分區塊
+    nav('life', A); pg.fill('#habitForm [name=call]', '秀英阿嬤'); pg.check('#habitForm input[name=lang][value="台語"]'); pg.click('#habitForm button[value="next"]'); W(800)
+    pg.fill('#habitForm [name=famAllergy]', '海鮮'); pg.click('#habitForm button[value="stay"]'); W(900)
+    h = store('cases/' + A).get('habit') or {}
+    check('F6', '填寫生活與照護習慣卡（部分區塊）', '已儲存 A、B 兩區，來源標示「家屬提供」；其餘區塊未填不影響送件', h.get('src') == '家屬提供' and h['data'].get('call') == '秀英阿嬤' and set(h.get('secAt', {}).keys()) == {'A', 'B'})
+    E(f"window.__autoHabitSkip = ['{A}', '{B}']")
+    nav('life', A, '0'); hs0 = stars('#habitForm')
+    check('B2', '草稿不等於提交', '儲存後為「草稿（未提交）」；沒有提交紀錄；護理端顯示「尚未提交」看不到草稿內容；表單只有必要欄位有 *（稱呼、慣用語言、聽力）；沒有「略過」按鈕', E(f"habitFamState(D.cases['{A}'])") == '草稿' and not store('cases/' + A)['habit'].get('sub') and E(f"habitState(D.cases['{A}'])") == '尚未提交' and E(f"habitOf(D.cases['{A}']).call || ''") == '' and len(hs0) == 3 and not pg.query_selector('[data-act="habit-skip"]'), hs0)
+    pg.click('[data-act="habit-submit"]'); W(600); be = pg.inner_text('#hsErr')
+    check('B3', '必要欄位未完成不能正式提交', '提示還沒填的必要欄位（聽力狀況、日常活動）；已填的稱呼保留', '聽力狀況' in be and '日常活動' in be and pg.input_value('#habitForm [name=call]') == '秀英阿嬤' and not store('cases/' + A)['habit'].get('sub'), be)
+    E(f"ACT['habit-submit']({{dataset:{{case:'{B}'}}}})"); W(400)
+    check('B4', '全空白不能正式提交', '還沒填任何內容的陳金水案件：不能提交、沒有提交紀錄', not (store('cases/' + B).get('habit') or {}).get('sub'))
+    hab_submit(A); sub = store('cases/' + A)['habit']['sub']
+    nav('home', A); hlab = pg.inner_text('#habitRow')
+    check('B5', '正式提交成功', '記錄提交日期時間、版本（第 1 次提交）；家屬看到「已提交，待護理初審」', sub['n'] == 1 and sub['at'] and sub['rev'] == store('cases/' + A)['habit']['rev'] and '已提交，待護理初審' in hlab, (sub.get('at'), hlab[:120]))
+    s2 = steps(A); req = E(f"famReqDocs(D.cases['{A}']).map(i => i.id)")
+    exp = max([store('items/' + i)['versions'][-1]['at'] for i in req] + [sub['at']])[:10]
+    check('A3', '上傳文件完成日期', '必要文件都提交、習慣卡正式提交後「上傳文件：已完成」，日期為最後一件提交的實際時間；機構審查進行中', s2[1][1:3] == ['已完成', exp] and s2[2][1] == '進行中', (s2[1], exp))
+    # 行政收件與出生日期比對
+    login('staff@example.com')
+    nav('receipt', I('idcopy')); pg.fill('#birthRaw', '民國 30 年 6 月 12 日'); W(200); bad = pg.inner_text('#birthCmp')
+    pg.fill('#birthRaw', '民國 29 年 6 月 12 日'); W(200); good = pg.inner_text('#birthCmp')
+    check('S9', '出生日期逐項比對', '民國 30 年 → 顯示不一致；民國 29 年 6 月 12 日 → 轉為 1940/06/12 一致', '不一致' in bad and '1940/06/12' in good and '一致' in good and '不一致' not in good, (bad[:60], good[:60]))
+    receipt(A, 'idcopy', '民國 29 年 6 月 12 日'); receipt(A, 'nhi', '029/06/12'); receipt(A, 'summary', '1940/06/12'); receipt(A, 'meds', '1940/06/12'); receipt(A, 'tubeCare', '民國 29 年 06 月 12 日', nid=False); receipt(A, 'swallow', '1940/06/12')
+    v = store('items/' + I('nhi'))['versions'][0]
+    check('S10', '行政收件核對', '非醫療文件（身分證、健保卡）確認符合；醫療文件轉「待護理核對」；出生日期比對結果有保存', st('idcopy') == '確認符合' and st('nhi') == '確認符合' and all(st(k) == '待護理核對' for k in ['summary', 'meds', 'tubeCare', 'swallow']) and (v.get('idCheck') or {}).get('birth', {}).get('result') == '一致', (st('idcopy'), v.get('idCheck')))
+    nav('doc', I('summary')); dv = main(); lg = [store(k)['what'] for k in keys('logs/') if store(k).get('caseId') == A]
+    check('F1', '行政可以查看完整醫療原始文件', '行政開啟出院病歷摘要：看得到原始文件，並說明醫療內容由護理確認；留下「行政查看醫療文件」紀錄', pg.query_selector('#staffMedNote') is not None and ('原始文件' in dv or pg.query_selector('main img, main iframe, main embed') is not None) and any('行政查看醫療文件' in x for x in lg), dv[:150])
+    v0 = store('items/' + I('summary'))['versions'][0]
+    for act in ['review-done', 'f-ok', 'dxr-ok', 'review-return']:
+        E(f"(() => {{ const b = document.createElement('button'); b.dataset.act = '{act}'; b.dataset.item = '{I('summary')}'; b.dataset.i = '0'; b.dataset.r = '0'; b.id = 'inj'; document.querySelector('main').appendChild(b); }})()"); clr(); pg.click('#inj'); W(400)
+    v1 = store('items/' + I('summary'))['versions'][0]; tm = toasts()
+    nav('review', I('summary')); rv = pg.query_selector('[data-act="review-done"]') is None
+    check('F2', '行政不能透過其他入口執行醫療專業核對', '在行政畫面塞入「完成核對／確認欄位／確認診斷／退回」按鈕並點擊，都被擋下並提示；文件沒有被標示護理核對完成；行政開不了核對頁', not v1.get('nurseOk') and v1 == v0 and '只有承辦護理師' in tm and rv, tm[:120])
+    nav('case', A)
+    check('F3', '行政不能指派護理師', '行政案件頁沒有分配按鈕；只有具分配權限的護理人員可以分配', pg.query_selector('[data-act="assign-nurse"]') is None and E("canAssign(me)") is False)
+    check('F4', '雙重核對：行政收件不代表醫療內容已確認', '出院摘要行政收件後是「待護理核對」，不是確認符合', st('summary') == '待護理核對')
+    # 護理：OCR、退回補件
+    login('nurse@example.com')
+    check('N1', '護理只看醫療文件', '身分證、健保卡不能由護理查看；工作清單只有 4 份醫療文件核對', E(f"nurseCanSee(D.items['{I('idcopy')}'])") is False and E("tasks().filter(t => t.tag === '核對').length") == 4)
+    review(A, 'summary', ocr={'stype': '住院出院摘要', 'dx': '腦中風後遺症（右側無力）、高血壓', 'dc': '2026-11-04', 'tube': '鼻胃管', 'allergy': '磺胺類藥物（皮疹）', 'wound': '無'})
+    o = store(f'ocrRuns/{I("summary")}__v1'); v = store('items/' + I('summary'))['versions'][0]
+    check('N2', 'OCR 辨識及人工確認', 'OCR 結果另存（ocrRuns）；每欄人工確認後完成核對；欄位保留 AI 來源', o is not None and v.get('nurseOk') and v['fields']['tube'] == '鼻胃管' and st('summary') == '確認符合', (o and list(o.keys()), v.get('fields')))
+    nav('review', I('meds')); pg.click('[data-act="review-return"]'); W(200); pg.select_option('#retReason', '文件模糊，看不清楚'); pg.fill('#retNote', '請重新拍攝清楚的帶藥明細'); pg.click('[data-act="modal-ok"]'); W(1500)
+    check('N3', '補件退回：護理退回用藥清單', '狀態「需補件」，補件請求開啟中並記錄原因與期限', st('meds') == '需補件' and store('items/' + I('meds'))['req']['reason'] == '文件模糊，看不清楚')
+    s3 = steps(A)
+    check('A4', '補件時進度正確顯示需要重新處理', '用藥清單被退回：「上傳文件：需重新處理」、機構審查也標示需重新處理，不因曾經上傳就算完成', s3[1][1] == '需重新處理' and s3[2][1] == '需重新處理' and s3[1][2] == '', s3[1:3])
+    review(A, 'tubeCare', fill={0: '鼻胃管 16Fr，右鼻孔 55 公分；每月更換（上次 11/01）；灌食後抬高床頭 30 度'})
+    review(A, 'swallow', fill={0: '管灌，不可由口進食'})
+    login('family@example.com'); t = main()
+    check('F7', '家屬查看審核狀態與補件原因', '首頁列出「需要重新上傳」與退回原因；補件進度卡顯示正式補件（開啟中、尚未重新上傳）', '文件模糊，看不清楚' in t and '補件進度' in t and '尚未重新上傳' in pg.inner_text('#reqCard') and '開啟中' in pg.inner_text('#reqCard'))
+    upload(A, 'meds', '04_用藥清單_張秀英')
+    m = store('items/' + I('meds'))
+    check('F8', '補件重新上傳', '新增第 2 版；狀態回到「待收件」，補件請求仍開啟（補傳不等於完成）；第 1 版保留', len(m['versions']) == 2 and st('meds') == '待收件' and not m['req'].get('closedAt') and bool(m['req'].get('uploadedAt')), (len(m['versions']), st('meds'), m['req']))
+    login('nurse@example.com'); nav('review', I('meds')); t8 = main()
+    check('F5', '護理不能跳過行政確認', '補傳的用藥清單還在「待收件」，護理核對頁沒有「完成核對」', st('meds') == '待收件' and pg.query_selector('[data-act="review-done"]') is None, t8[:120])
+    login('staff@example.com'); nav('followup'); t = main()
+    check('S11', '補件追蹤', '列出用藥清單的補件狀態', '目前用藥清單或處方資料' in t)
+    receipt(A, 'meds', '1940/06/12')
+    login('nurse@example.com'); review(A, 'meds', ocr={'meds': ['Aspirin 100 mg 每日一次 經鼻胃管', 'Amlodipine 5 mg 每日一次 早上'], 'note': '藥物磨粉後經鼻胃管給藥'})
+    m = store('items/' + I('meds'))
+    check('N4', '補件核對完成後關閉補件請求', '用藥清單確認符合，補件請求自動關閉', st('meds') == '確認符合' and bool(m['req'].get('closedAt')), m.get('req'))
+    tk = E(f"tasks().filter(t => t.c.id === '{A}' && t.tag === '習慣卡').map(t => [!!t.opt, t.what])")
+    check('B6', '提交後產生護理必要待辦', '承辦護理師工作台出現「生活與照護習慣卡初審」，列在必要待辦（不是選填）', tk and tk[0][0] is False and '生活與照護習慣卡初審' in tk[0][1], tk)
+    check('B7', '習慣卡未初審時不能開始收治評估', '必要文件都已確認；因習慣卡尚未完成初審，案件仍是「文件審查中」，評估前置條件擋下', E(f"docsReady(D.cases['{A}'])") and ph() == '文件審查中' and '習慣卡' in str(E(f"assessGuard(D.cases['{A}'])")), (ph(), E(f"assessGuard(D.cases['{A}'])")))
+    nav('resident', A); pg.fill('#hrNote', '海鮮過敏需再確認'); pg.click(f'[data-act="habit-review"][data-case="{A}"][data-state="有疑義"]'); W(1200)
+    check('B8', '有疑義時不視為完成', '標示有疑義後狀態「有疑義／待確認」；仍不能評估；機構審查仍是進行中', E(f"habitState(D.cases['{A}'])") == '有疑義／待確認' and ph() == '文件審查中' and steps(A)[2][1] == '進行中')
+    hr_ok(A, '疑義已處理'); hrv = store('cases/' + A)['habitReview']
+    check('B9', '護理初審完成', '記錄案件、習慣卡版本、審核人員、日期時間、狀態、處理說明；成功後才顯示完成；案件進入「評估中」', hrv['done']['by'] == 'nurse@example.com' and hrv['done']['rev'] == sub['rev'] and hrv['done']['at'] and hrv['state'] == '審核完成' and hrv['done']['diffRes'] and '已完成習慣卡審核' in toasts() and ph() == '評估中', ph())
+    check('B10', '審核完成且沒有異動時不重複審核', '習慣卡任務消失', E(f"tasks().filter(t => t.c.id === '{A}' && t.tag === '習慣卡').length") == 0)
+    s4 = steps(A); req = E(f"famReqDocs(D.cases['{A}']).map(i => i.id)")
+    def done_at(i):
+        v = store('items/' + i)['versions'][-1]; t = [x for x in [(v.get('idCheck') or {}).get('at'), v.get('dateAt'), v.get('nurseAt')] if x]; return max(t) if t else None
+    exp4 = max([done_at(i) for i in req] + [hrv['done']['at']])[:10]
+    check('A5', '機構審查完成日期', '必要文件完成行政與護理核對、習慣卡初審完成後才「已完成」，日期為最後一項核對完成的實際時間', s4[2][1:3] == ['已完成', exp4], (s4[2], exp4))
+
+    nav('assess', A); pg.select_option('#assessForm [name=move]', '二人協助'); pg.check('#assessForm input[name=result][value="收治"]'); pg.click('#assessForm button[type=submit]'); W(300); pg.click('[data-act="modal-ok"]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(800)
+    check('N5', '收治評估（先審後簽）', '結果「收治」，案件「已收治待簽約」', ph() == '已收治待簽約', ph())
+    s5 = steps(A); asm = store('cases/' + A)['assessment']
+    check('A6', '評估結果完成日期與結果', '「評估結果：已完成｜評估日期」並註明「收治」', s5[3][1:4] == ['已完成', d10(asm['at']), '收治'], s5[3])
+    tst = E(f"(() => {{ const c = JSON.parse(JSON.stringify(D.cases['{A}'])); c.assessment = Object.assign({{}}, c.assessment, {{result:'需補充'}}); const a = stepsInfo(c)[3]; c.assessment.result = '待協調'; const b = stepsInfo(c)[3]; c.assessment.result = '不收治'; const d = stepsInfo(c)[3]; return [a.state, b.state + b.note, d.state + d.note]; }})()")
+    check('A7', '需補充、待協調、不收治不會被當成評估通過（程式層級）', '需補充 → 需重新處理；待協調 → 進行中（待協調）；不收治 → 已完成並註明不收治', tst == ['需重新處理', '進行中待協調', '已完成不收治'], tst)
+    login('staff@example.com'); signed(A)
+    check('S12', '行政記錄簽約', '已簽約；入住前文件開始要求（案件「待補件」）', bool(store('cases/' + A).get('signedAt')) and ph() == '待補件', ph())
+    login('family@example.com')
+    upload(A, 'exam', '08_體檢報告_張秀英', '2026-11-05')
+    nav('upload', A, I('xray')); pg.click('[data-act="use-exam"]'); pg.wait_for_function("route.page === 'uploaded'", timeout=15000); W(300)
+    x = store('items/' + I('xray'))['versions'][0]
+    check('F10', '體檢報告一次上傳，X 光沿用同一份檔案', 'X 光第 1 版標示沿用體檢報告檔案，狀態仍需核對（不會自動通過）', bool(x.get('fromItem')) and st('xray') not in ('確認符合', '即將到期'), (x.get('fromItem'), st('xray')))
+    upload(A, 'stool', '09_糞便檢查_張秀英', '2026-11-05'); upload(A, 'signerId', '10_簽約者身分證_張家豪'); upload(A, 'relProof', '11_戶口名簿_張秀英'); upload(A, 'emergency', '12_緊急事故處理同意書_張秀英'); upload(A, 'contract', '13_入住契約_張秀英')
+    login('staff@example.com')
+    receipt(A, 'exam', '1940/06/12'); receipt(A, 'xray', '1940/06/12'); receipt(A, 'stool', '1940/06/12'); receipt(A, 'signerId', None, signer='張家豪')
+    receipt(A, 'relProof', '民國 29 年 6 月 12 日', nid=False); receipt(A, 'emergency', None, nid=False); receipt(A, 'contract', None, nid=False)
+    datec(A, 'exam', '2026-11-05'); datec(A, 'xray', '2026-11-05'); datec(A, 'stool', '2026-11-05')
+    check('S13', '入住前文件收件與效期確認', '簽約者證明、戶籍證明、同意書、契約確認符合；體檢、X 光、糞便進入「待護理核對」', all(st(k) == '確認符合' for k in ['signerId', 'relProof', 'emergency', 'contract']) and all(st(k) == '待護理核對' for k in ['exam', 'xray', 'stool']), {k: st(k) for k in ['signerId', 'relProof', 'emergency', 'contract', 'exam', 'xray', 'stool']})
+    login('nurse@example.com'); nav('review', I('exam')); labs = E("reviewState.fields.map(f => f.label)")
+    check('N6', '健康檢查逐項核對項目', '8 項檢查各分成「報告是否包含」與「檢查結果」兩欄，另有醫師註記；共 17 欄', len(labs) == 17 and '肝功能：報告是否包含（需要繳交）' in labs and '電解質：檢查結果' in labs, labs)
+    review(A, 'exam', ocr=EXAM_OCR)
+    review(A, 'xray', ocr={'res': '心肺無明顯異常，未見活動性肺結核'}); review(A, 'stool', ocr={'res': '陰性'})
+    check('F11', '簽約階段選填文件未上傳', '收費明細、繳費收據、保證金未上傳，案件仍進入摘要卡審核', ph() == '摘要卡審核中' and not store('items/' + I('payReceipt'))['versions'], ph())
+    nav('card', A); t = pg.text_content('main')
+    check('N7', '照護摘要卡草稿取得已確認資料', 'A 區管路帶入「鼻胃管」、過敏帶入「磺胺類藥物」；B 區稱呼「秀英阿嬤」；資料差異列出家屬所填過敏「海鮮」', '鼻胃管' in pg.input_value('#cardForm [name=tube]') and '磺胺' in pg.input_value('#cardForm [name=allergy]') and pg.input_value('#cardForm [name=call]') == '秀英阿嬤' and '海鮮' in t and '停用文件' not in t)
+    pg.check('#cardForm input[name=cg][value="care@example.com"]'); pg.fill('#cardForm [name=risk]', '右側無力，移位需兩人協助'); pg.click('#cardForm button[type=submit]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(800)
+    check('N8', '開放照顧摘要卡', '摘要卡第 1 版已開放給阿妮；案件「摘要卡已開放」', store('cases/' + A)['card']['status'] == '已開放' and ph() == '摘要卡已開放', ph())
+    s6 = steps(A); cd = store('cases/' + A)['card']
+    check('A8', '入住準備完成日期', '摘要卡經護理正式開放後「入住準備：已完成｜開放日期」', s6[4][1:3] == ['已完成', d10(cd['at'])], s6[4])
+    # E 護理端用語
+    for pgname, arg in [('home', None), ('residents', None), ('resident', A), ('card', A), ('assess', A)]:
+        nav(pgname, arg); nurse_txt.append(main())
+    nav('resident', A); pg.click(f'[data-act="need-edit"][data-item="{I("tubeCare")}"]'); W(300); nurse_txt.append(pg.inner_text('.dialog')); pg.click('[data-act="modal-cancel"]'); W(200)
+    E("workTab = 'done'; go('home')"); W(300); nurse_txt.append(main()); E("workTab = 'todo'; go('home')"); W(200)
+    hit = [t[max(0, t.find('長輩') - 15):t.find('長輩') + 10] for t in nurse_txt if '長輩' in t]
+    check('E1', '護理人員可見介面「長輩」都改成「住民」', '工作台、資料夾搜尋、住民清單、住民資料、照顧摘要卡、收治評估、照護文件需求判斷視窗、已完成清單都沒有「長輩」', not hit and '搜尋住民姓名或案件編號' in nurse_txt[0], hit)
+    login('family@example.com'); nav('home', A); ft = pg.text_content('main'); to_guide(); gt = pg.text_content('main')
+    check('E2', '家屬端也統一用「住民」（第 (15) 版）', '家屬首頁與流程說明使用「住民生活與照護習慣卡」「住民身分證明文件」，沒有「長輩」', '住民生活與照護習慣卡' in ft and '住民身分證明文件' in gt and '長輩' not in ft + gt)
+    check('E3', '不修改資料庫內容、原始文件與歷史紀錄', '文件項目名稱、操作紀錄維持原樣（只在護理畫面轉換用語）', store('items/' + I('idcopy'))['name'] == '長輩身分證明文件' and store('items/' + I('tubeCare'))['cond'] == '長輩有鼻胃管、尿管、氣切等管路時', (store('items/' + I('idcopy'))['name'], store('items/' + I('tubeCare')).get('cond')))
+    s7a = pg.evaluate("document.body.innerText.length"); login('family@example.com'); nav('home', A); b1 = pg.inner_text('#stepsBar'); logout(); login('family@example.com'); nav('home', A); b2 = pg.inner_text('#stepsBar')
+    check('A9', '重新登入後日期不變', '登出再登入，進度列的狀態與日期完全相同', b1 == b2 and '日期未記錄' not in b1, b1.replace('\n', ' '))
+    pg.set_viewport_size({'width': 390, 'height': 800}); W(300)
+    geo = E("(() => { const li = [...document.querySelectorAll('#stepsBar li')].map(x => x.getBoundingClientRect()); return {stack: li.every((r, i) => !i || r.top >= li[i - 1].bottom - 1), ovf: document.documentElement.scrollWidth > document.documentElement.clientWidth}; })()")
+    pg.set_viewport_size({'width': 1280, 'height': 900}); W(200)
+    check('A10', '手機版進度列不擠在一起', '390px 寬時五個階段上下排列、沒有水平捲動', geo['stack'] and not geo['ovf'], geo)
+    leg = E(f"(() => {{ const c = JSON.parse(JSON.stringify(D.cases['{A}'])); delete c.consent.at; delete c.card.at; return stepsInfo(c).map(x => x.date); }})()")
+    check('A11', '舊案件沒有可靠時間時不補日期（程式層級）', '同意與摘要卡沒有記錄時間：顯示「日期未記錄」，不使用今天日期', leg[0] == '日期未記錄' and leg[4] == '日期未記錄', leg)
+    login('care@example.com'); t = main()
+    check('C1', '照服員查看已授權個案', '我的住民列出張秀英', '張秀英' in t)
+    nav('card', A); t = main()
+    check('C2', '照服員查看摘要卡與家屬提供之生活習慣', 'A 區健康重點（鼻胃管）與 B 區「家屬提供」來源標示；看不到身分證字號、契約', '鼻胃管' in t and '秀英阿嬤' in t and '家屬提供' in t and 'F223344556' not in t and '入住契約' not in t)
+    login('care2@example.com')
+    check('C3', '未授權的照服員', '黎氏蘭看不到張秀英', '張秀英' not in main())
+    # 摘要卡更新提示
+    login('family@example.com'); nav('life', A, '4'); pg.fill('#habitForm [name=likeAct]', '聽歌仔戲'); pg.click('#habitForm button[value="stay"]'); W(1200); pg.click('[data-act="habit-submit"]'); W(1500)
+    check('N9', '家屬更新習慣卡 → 摘要卡需要重新確認', '案件變成「摘要卡待重新審核」', ph() == '摘要卡待重新審核', ph())
+    s9 = steps(A); hs9 = E(f"habitState(D.cases['{A}'])")
+    check('A12', '摘要卡重新審核時區分目前狀態', '家屬重新提交習慣卡後，入住準備「需重新處理」、不顯示完成日期；機構審查保留完成日期', s9[4][1] == '需重新處理' and s9[4][2] == '' and s9[2][1] == '已完成' and s9[2][2] != '', s9)
+    check('B11', '家屬修改後保留原審核紀錄，只重新確認受影響內容', '習慣卡為「資料已變更，需重新確認」，只列出「喜歡的活動」；原審核紀錄保留；第 2 次提交有記錄', hs9 == '資料已變更，需重新確認' and len(E(f"habitChanges(D.cases['{A}']).fam")) == 1 and store('cases/' + A)['habit']['sub']['n'] == 2 and store('cases/' + A)['habitReview']['done']['rev'] == sub['rev'], hs9)
+    E(f"ACT['habit-submit']({{dataset:{{case:'{A}'}}}})"); W(500)
+    check('B12', '內容沒有變更時不重複提交', '直接再提交一次被擋下，仍是第 2 次提交', store('cases/' + A)['habit']['sub']['n'] == 2)
+    login('care@example.com'); nav('card', A); t = main()
+    check('C4', '照服員看到資料更新提示', '顯示「資料已更新，需重新確認」，受影響欄位顯示「請問護理站」', '資料已更新' in t, t[:200])
+    login('nurse@example.com'); hr_ok(A, '確認新增的活動偏好')
+    nav('resident', A); pg.click('[data-act="card-revise"]'); W(1200); pg.check('#cardForm input[name=cg][value="care@example.com"]'); pg.click('#cardForm button[type=submit]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(800)
+    cc = store('cases/' + A)
+    check('N10', '護理更新並重新確認摘要卡', '第 2 版開放，第 1 版保留在歷史；案件回到「摘要卡已開放」', cc['card']['v'] == 2 and len(cc.get('cardHistory', [])) == 1 and ph() == '摘要卡已開放' and '聽歌仔戲' in cc['card'].get('prefs', ''), (cc['card']['v'], ph()))
+
+    # ================= 先簽後審：陳金水 =================
+    login('staff@example.com'); confirm_apply(B, 'nurse2@example.com')
+    login('family2@example.com'); nav('consent', B); sk = stars('#consentForm')
+    check('G11', '個人資料同意書必填標示', '簽署身分、必要同意、簽署人真實姓名有 *；選填同意項目沒有', len(sk) == 3, sk)
+    login('family2@example.com'); consent(B)
+    t = (to_guide() or pg.text_content('#docList'))
+    check('P1', '先簽後審：一開始就要求全部文件', '入住契約、體檢報告等入住前文件也列入目前要上傳', E(f"activeItems(D.cases['{B}']).some(i => i.key === 'contract')") is True)
+    nav('home', B); pg.click('[data-act="fgo"][data-page="life"]') if pg.query_selector('[data-act="fgo"][data-page="life"]') else None; W(400)
+    skip = pg.query_selector('[data-act="habit-skip"]')
+    check('F12', '生活與照護習慣卡不能略過（八大項）', '習慣卡頁沒有「略過」按鈕；未提交時家屬待辦列出習慣卡', skip is None and E(f"habitFamTodo(D.cases['{B}'])") is True)
+    nav('home', B)
+    check('C3', '先簽後審也要求第一階段習慣卡', '陳金水的目前要做的事也列出必填習慣卡', '住民生活與照護習慣卡（必填）' in (pg.inner_text('#todoHero') if pg.query_selector('#todoHero') else ''))
+    hab_submit(B)
+    for k, img, d in [('idcopy', '14_身分證影本_陳金水', None), ('nhi', '15_健保卡_陳金水', None), ('summary', '16_近期醫療摘要_陳金水', None), ('meds', '17_用藥清單_陳金水', None), ('exam', '18_體檢報告_陳金水', '2026-11-06'), ('stool', '19_糞便檢查_陳金水', '2026-11-07'), ('signerId', '20_簽約者身分證_陳淑芬', None), ('emergency', '21_緊急事故處理同意書_陳金水', None), ('contract', '22_入住契約_陳金水', None)]:
+        upload(B, k, img, d)
+    nav('upload', B, I('xray', B)); pg.click('[data-act="use-exam"]'); pg.wait_for_function("route.page === 'uploaded'", timeout=15000); W(300)
+    login('staff@example.com')
+    need(B, 'tubeCare', 'no', '門診摘要記載無管路'); need(B, 'woundCare', 'no', '門診摘要記載無傷口'); need(B, 'swallow', 'no', '可正常由口進食')
+    for k in ['idcopy', 'nhi', 'summary', 'meds', 'exam', 'xray', 'stool']: receipt(B, k, '1936/09/20')
+    receipt(B, 'signerId', None, signer='陳淑芬'); receipt(B, 'emergency', None, nid=False); receipt(B, 'contract', None, nid=False)
+    datec(B, 'exam', '2026-11-06'); datec(B, 'xray', '2026-11-06'); datec(B, 'stool', '2026-11-07')
+    login('nurse2@example.com')
+    review(B, 'summary', ocr={'stype': '門診／近期醫療摘要', 'dx': '失智症（輕度）、第二型糖尿病', 'tube': '無', 'allergy': '無已知過敏', 'wound': '文件未記載'})
+    review(B, 'meds', ocr={'meds': ['Metformin 500 mg 每日兩次 早晚餐後', 'Donepezil 5 mg 每日一次 睡前'], 'note': '飯後服用'})
+    review(B, 'exam', ocr=EXAM_OCR)
+    review(B, 'xray', ocr={'res': '心肺無明顯異常'}); review(B, 'stool', ocr={'res': '陰性'})
+    check('P2', '視情況文件「尚未確認」時不算齊全', '戶籍或代理關係證明尚未確認 → 案件停在文件階段，不會進入「待簽約」', ph(B) not in ('待簽約', '入住前確認中') and E(f"condPending(D.items['{I('relProof', B)}'])") is True, ph(B))
+    # 行政發出補件通知（選填文件改為需要）
+    login('staff@example.com'); nav('case', B); pg.click('main [data-act="staff-request"]'); W(300); pg.check(f'input[name=srItem][value="{I("diag", B)}"]'); pg.fill('#srNote', '請補診斷證明，確認失智症診斷'); pg.click('[data-act="modal-ok"]'); W(1500)
+    d = store('items/' + I('diag', B))
+    check('S14', '行政發出補件通知', '選填的診斷證明改為「需要繳交」、補件請求開啟；家屬收到通知', d['need'] == '必備' and d['req'] and any('診斷證明' in store(k)['text'] for k in keys('notices/') if store(k)['caseId'] == B))
+    need(B, 'relProof', 'yes', '由女兒簽約')
+    login('family2@example.com'); upload(B, 'relProof', '23_戶口名簿_陳金水'); upload(B, 'diag', '16_近期醫療摘要_陳金水')
+    login('staff@example.com'); receipt(B, 'relProof', '民國 25 年 9 月 20 日', nid=False); receipt(B, 'diag', '1936/09/20')
+    login('nurse2@example.com'); review(B, 'diag', fill={0: '失智症（輕度）、第二型糖尿病', 1: '2026-11-03'})
+    hr_ok(B)
+    check('S15', '確認補件狀態', '診斷證明確認符合、補件請求關閉；全部文件齊全後案件「待簽約」', st('diag', B) == '確認符合' and bool(store('items/' + I('diag', B))['req'].get('closedAt')) and ph(B) == '待簽約', (st('diag', B), ph(B)))
+    login('staff@example.com'); signed(B)
+    check('P3', '先簽後審記錄入住契約', '案件「入住前確認中」', ph(B) == '入住前確認中', ph(B))
+    sb = steps(B); sgn = store('cases/' + B)['signedAt']
+    check('A13', '先簽後審「參訪簽約」日期', '流程名稱保留「參訪簽約」，日期使用實際簽約紀錄；評估尚未做', sb[3][0] == '參訪簽約' and sb[3][1:3] == ['已完成', d10(sgn)] and not store('cases/' + B).get('assessment'), sb[3])
+    login('nurse2@example.com'); nav('assess', B); pg.select_option('#assessForm [name=move]', '可自行移位'); pg.check('#assessForm input[name=result][value="可入住"]'); pg.click('#assessForm button[type=submit]'); W(300); pg.click('[data-act="modal-ok"]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(800)
+    check('P4', '入住前護理確認（先簽後審）', '結果「可入住」，案件「摘要卡審核中」', ph(B) == '摘要卡審核中', ph(B))
+    nav('card', B); pg.check('#cardForm input[name=cg][value="care2@example.com"]'); pg.click('#cardForm button[type=submit]'); pg.wait_for_function("route.page === 'home'", timeout=15000); W(800)
+    check('P5', '先簽後審完整跑完', '摘要卡已開放給黎氏蘭', ph(B) == '摘要卡已開放' and store('cases/' + B)['card']['caregivers'] == ['care2@example.com'], ph(B))
+    sb = steps(B)
+    check('A14', '先簽後審完成全部階段', '五個階段都已完成且都有日期', all(x[1] == '已完成' and x[2] and x[2] != '日期未記錄' for x in sb), sb)
+    login('family2@example.com'); to_guide(); gtx = pg.inner_text('#fullDocList'); gb = E("document.querySelectorAll('#fullDocList button').length")
+    check('C4', '已有案件：依案件查看適用清單與狀態（唯讀）', '流程說明的完整清單顯示陳金水各文件狀態（例如已上傳第 1 版）與習慣卡狀態；沒有上傳、補件或查看檔案按鈕', '陳金水' in pg.inner_text('#guideCase') and '已上傳第' in gtx and '審核完成' in gtx and gb == 0, (gb, gtx[:120]))
+    # 通知寫入失敗與重試
+    login('staff@example.com'); nav('case', B)
+    fail('notices/'); pg.click('main [data-act="staff-request"]'); W(300); pg.check(f'input[name=srItem][value="{I("labs", B)}"]'); pg.fill('#srNote', '請補近期檢驗報告'); pg.click('[data-act="modal-ok"]'); W(1500); fail(None)
+    check('W8', '資料寫入失敗：補件通知寫入失敗', '補件要求已保存；畫面上方出現待送清單', bool(store('items/' + I('labs', B)).get('req')) and not any('近期檢驗及影像報告' in store(k)['text'] for k in keys('notices/')) and '沒有送出' in bar(), bar()[:100])
+    pg.click('[data-act="outbox-retry"]'); W(1500)
+    check('W9', '待送清單重試', '通知補送成功，待送清單清空', any('近期檢驗及影像報告' in store(k)['text'] for k in keys('notices/') if store(k)['caseId'] == B) and bar() == '', bar()[:100])
+    login('admin@example.com'); nav('logs'); t = main()
+    check('M5', '操作紀錄', '列出建立文件清單、條件式判斷、補件、簽約、摘要卡開放等紀錄', all(x in t for x in ['建立入住文件清單', '護理已確認：不需要', '要求補件', '照顧摘要卡']), t[:200])
+    check('Z1', '整個測試過程沒有 JavaScript 錯誤', '主控台沒有錯誤', not errs, errs[:3])
+    b.close()
+json.dump(results, open('/home/claude/simp/run_eight.json', 'w'), ensure_ascii=False, indent=1)
+print('TOTAL', len(results), 'PASS', sum(r['result'] == 'PASS' for r in results))

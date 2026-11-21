@@ -1,0 +1,75 @@
+/* 共用版面：顏色變數、字級、頁首、導覽列、主內容、頁尾。沿用原型第 (18) 版樣式。 */
+/* 導覽列選取樣式只由 aria-current="page" 決定（HANDOFF 6.3）。 */
+:root{
+  /* 版面：頂部列（機構名、使用者、登出）＋角色功能分頁；家屬窄版手機優先，機構端寬版工作清單 */
+  --bg:#f3f5f4; --card:#ffffff; --ink:#1b2a33; --muted:#5a6a74; --line:#d5dde0;
+  --accent:#17607a; --accent-ink:#ffffff; --accent-soft:#e1eef2;
+  --ok:#2e7d4f; --ok-soft:#e3f2e8; --warn:#9a5a00; --warn-soft:#fbefd9; --bad:#b3362c; --bad-soft:#fbe5e2;
+  --paper:#fffdf6;
+  --font:"Noto Sans TC",-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#11181c; --card:#182228; --ink:#e3eaee; --muted:#9aaab3; --line:#2c3a42;
+    --accent:#6fb8d2; --accent-ink:#0d1a20; --accent-soft:#1a3240;
+    --ok:#79c79a; --ok-soft:#173226; --warn:#e2b061; --warn-soft:#382a12; --bad:#ef8f86; --bad-soft:#3a1d1a;
+    --paper:#1f272b; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11181c; --card:#182228; --ink:#e3eaee; --muted:#9aaab3; --line:#2c3a42;
+  --accent:#6fb8d2; --accent-ink:#0d1a20; --accent-soft:#1a3240;
+  --ok:#79c79a; --ok-soft:#173226; --warn:#e2b061; --warn-soft:#382a12; --bad:#ef8f86; --bad-soft:#3a1d1a;
+  --paper:#1f272b; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{font-size:16px}
+html.fs-l{font-size:18px}
+html.fs-xl{font-size:20px}
+.fs-wrap{position:relative}
+.fs-menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.14);padding:6px;display:grid;gap:4px;min-width:9em;z-index:30}
+.fs-menu button{border:0;background:none;text-align:left;padding:6px 10px;border-radius:8px;cursor:pointer;white-space:nowrap}
+.fs-menu button[aria-checked="true"]{background:var(--accent-soft);font-weight:700}
+.fs-ico{font-weight:700;letter-spacing:-.02em}
+@media (max-width:1100px){html.fs-xl .split,html.fs-xl .grid2{grid-template-columns:1fr} html.fs-xl .doc{position:static}}
+@media (max-width:980px){html.fs-l .split{grid-template-columns:1fr} html.fs-l .doc{position:static}}
+html.fs-xl .task{grid-template-columns:1fr}
+html.fs-l .steps,html.fs-xl .steps{font-size:.78rem}
+body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.65 var(--font)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+[hidden]{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.top{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--line)}
+.top-in{max-width:1180px;margin:0 auto;padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.brand{font-weight:700;display:flex;align-items:center;gap:8px;margin-right:auto}
+.brand-mark{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block}
+.who{font-size:.9rem;color:var(--muted)}
+.who strong{color:var(--ink)}
+.btn-ghost{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.88rem;display:inline-flex;gap:6px;align-items:center}
+.badge{min-width:1.4em;padding:0 6px;border-radius:999px;background:var(--bad);color:#fff;font-size:.75rem;line-height:1.5;text-align:center}
+.subnav{max-width:1180px;margin:0 auto;padding:0 16px;display:flex;gap:4px;flex-wrap:wrap}
+.subnav button{border:0;border-bottom:3px solid transparent;background:none;padding:8px 12px;cursor:pointer;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+.subnav button[aria-current="page"]{border-bottom-color:var(--accent);color:var(--ink);font-weight:700}
+.updbar{max-width:1180px;margin:10px auto 0;padding:0 16px}
+main{max-width:1180px;margin:0 auto;padding:20px 16px 80px}
+.narrow{max-width:640px;margin:0 auto}
+.auth{max-width:440px;margin:6vh auto 0}
+h1{font-size:1.55rem;line-height:1.3;margin:0 0 6px;text-wrap:balance}
+h2{font-size:1.15rem;margin:0 0 10px;text-wrap:balance}
+h3{font-size:1rem;margin:0 0 6px}
+p{margin:0 0 10px}
+.lead{color:var(--muted);margin-bottom:16px}
+.purpose{display:flex;gap:10px;align-items:flex-start;background:var(--accent-soft);border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:.95rem}
+.purpose strong{white-space:nowrap}
+.stack{display:grid;gap:14px}
+.stack>*,.grid2>*,.split>*{min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.back{border:0;background:none;color:var(--accent);cursor:pointer;padding:0;margin-bottom:8px;font-size:.95rem}
+.muted{color:var(--muted)} .small{font-size:.88rem} .mono{font-family:var(--mono);font-size:.9em}
+.site-foot{max-width:1180px;margin:0 auto;padding:0 16px 20px;font-size:.78rem;color:var(--muted);text-align:center}
+.app-loading{padding:22px;text-align:center;color:var(--muted)}
