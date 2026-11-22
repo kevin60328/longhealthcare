@@ -1,5 +1,5 @@
 /* 階段 8：照顧摘要卡寫入流程（畫面操作），用種子案件 T-C（摘要卡待審核）。
- *   護理從工作清單「審核照顧摘要卡」→ 不選照服員擋下 → 選照服員開放 → 照服員看到 → 護理停用 → 照服員只看到「已停用」
+ *   護理從工作清單「審核照顧摘要卡」→ 不選照服員擋下 → 選照服員開放 → 照服員看到 → 護理停用 → 照服員只看到「已停用」→ 護理重新開放
  * 結束時刪除這次建立的摘要卡，T-C 回到原狀（其他測試與截圖對照需要）。 */
 import { test, expect } from '@playwright/test';
 import { login, service } from '../helpers.js';
@@ -58,4 +58,12 @@ test('護理審核並開放 → 照服員看到 → 護理停用 → 照服員�
   await expect(page.getByRole('heading', { name: '這張摘要卡已停用' })).toBeVisible();
   await expect(page.locator('main')).toContainText('住民轉院，內容需重新評估');
   await expect(page.locator('.cblock')).toHaveCount(0);
+
+  /* 護理重新開放（伺服器端檢查依據沒有變更）→ 照服員又看得到內容 */
+  await page.getByRole('button', { name: '登出' }).click();
+  await login(page, 'nurse@example.com');
+  await page.goto(`/care-summary.html?case=${C}`);
+  await page.getByRole('button', { name: '重新開放' }).click();
+  await expect(page.locator('.toast')).toHaveText('已重新開放');
+  await expect(page.getByRole('button', { name: '停用摘要卡' })).toBeVisible();
 });

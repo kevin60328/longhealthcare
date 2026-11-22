@@ -125,7 +125,8 @@
 | 7 | `save_supp` | 護理補充評估（醫院沒有提供獨立紀錄時；記錄來源，不當成醫院文件） |
 | 7 | `dx_import`、`dx_save`、`dx_resync` | 診斷清單（ICD-10-CM 只檢查格式；修改要帶畫面看到的原文，防止同時修改） |
 | 7 | `review_habit` | 習慣卡初審（以資料庫的正式提交為快照；版本不符擋下） |
-| 8 | `open_care_card`、`revise_care_card`、`discard_care_card`、`stop_care_card`、`resume_care_card` | 照顧摘要卡：開放（第一次新增；修訂時草稿轉開放、舊版標示已取代，同一交易；檢查開放條件 `card_allowed` 與照服員身分）、修訂草稿、放棄、停用、重新開放 |
+| 8 | `open_care_card`、`revise_care_card`、`discard_care_card`、`stop_care_card` | 照顧摘要卡：開放（第一次新增；修訂時草稿轉開放、舊版標示已取代，同一交易；檢查開放條件 `card_allowed` 與照服員身分）、修訂草稿、放棄、停用 |
+| 8（後端） | `resume_care_card_as` | 重新開放：由 Edge Function care-card 先用規則 cardChanged 確認停用期間依據沒有改變，再以 service role 呼叫（000032；舊的 `resume_care_card` 已收回一般使用者權限） |
 | 8 | `case_cards` | 承辦護理師讀取草稿與歷史版本內容 |
 | 8（後端） | `my_care_card` | 照服員讀自己的卡（Edge Function care-card 以 service role 呼叫，另依規則算出依據變更的欄位） |
 | 7 | `save_assessment` | 收治評估／入住前確認；每次送出前重新檢查承辦、利益衝突、文件齊全（`docs_ready`）、習慣卡初審（`habit_gate`）、簽約、目前沒有有效評估 |

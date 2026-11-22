@@ -133,9 +133,12 @@ function managePage({ main, R, c, cards }, back, CR, live){
   main.querySelector('#cardResume')?.addEventListener('click', async e => {
     if (!R.canProcess(c)) return toast('案件已結案或授權已撤回，不能開放');
     if (R.cardChanged({ ...c, card: { ...c.card, status: '已開放' } }).length) return toast('摘要卡依據的資料已變更，請改用「修訂內容」產生新版本並審核');
-    e.currentTarget.disabled = true;
-    const { error } = await supabase().rpc('resume_care_card', { p_case: c.id });
-    if (error){ e.currentTarget.disabled = false; return toast('重新開放失敗：' + errText(error)); }
+    /* 伺服器端（Edge Function care-card）用同一份規則再檢查一次依據是否變更，通過才重新開放 */
+    const b = e.currentTarget; b.disabled = true;
+    const { data, error } = await supabase().functions.invoke('care-card', { body: { action: 'resume', case_id: c.id } });
+    let reason = data && !data.ok ? data.reason : '';
+    if (error){ reason = error.message; try { reason = (await error.context.json()).error || reason; } catch { /* 沿用原訊息 */ } }
+    if (reason){ b.disabled = false; return toast('重新開放失敗：' + reason); }
     done('已重新開放');
   });
 }

@@ -3,18 +3,25 @@
  * 前提：已 npm run db:push、npm run functions:deploy。 */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { as, service } from './helpers.js';
+import { assembleModel, todayTW } from '../../js/modules/services/model-build.js';
+import { createRules } from '../../js/modules/rules/core.js';
 
 let nurse, nurse2, staff, care, care2, C, ID = {};
 const cards = () => service().from('care_cards').select('v, status, end_note').eq('case_id', C).order('v').then(r => r.data);
 const cardFn = (db, body) => db.functions.invoke('care-card', { body }).then(async r => r.error ? { status: r.error.context?.status, error: r.error } : r.data);
 const content = { dx: '高血壓', allergy: '無已知過敏', tube: '無', call: '張伯伯', hints: ['服用降血壓藥：扶起身時要慢，注意頭暈'], layout: 2, pending: [] };
-const basis = { tube: '無', allergy: '無已知過敏', dx: '高血壓' };
+let basis;   // 開放時的依據快照：用規則（rules/core.js cardBasis）依 T-C 目前資料算出，與畫面相同
 
 beforeAll(async () => {
   [nurse, nurse2, staff, care, care2] = await Promise.all(['nurse', 'nurse2', 'staff', 'care', 'care2'].map(e => as(e + '@example.com')));
   for (const p of (await service().from('profiles').select('id, email')).data) ID[p.email.split('@')[0]] = p.id;
   C = (await service().from('cases').select('id').eq('no', 'T-C').single()).data.id;
   expect(await cards()).toEqual([]);   // 前提：T-C 還沒有摘要卡（npm run db:seed-cases 可恢復）
+  const svc = service();
+  const [m, profiles, org, catalog] = await Promise.all([svc.rpc('get_case_models', { p_case: C, p_include_closed: true }), svc.from('profiles').select('*'),
+    svc.from('org_settings').select('*').eq('id', 1).maybeSingle(), svc.from('doc_catalog').select('key, why, "where", on_demand').order('sort')]);
+  const { D } = assembleModel({ models: m.data, profiles: profiles.data, org: org.data, catalog: catalog.data, staff: [] }, null);
+  basis = createRules(D, { me: null, today: todayTW() }).cardBasis(D.cases[C]);
 }, 60000);
 afterAll(async () => {
   const svc = service(), ids = (await svc.from('care_cards').select('id').eq('case_id', C)).data.map(x => x.id);
@@ -76,13 +83,26 @@ describe('修訂、停用、重新開放', () => {
     expect((await nurse.rpc('discard_care_card', { p_case: C, p_v: 3 })).error).toBeNull();
     expect((await cards()).map(x => x.v)).toEqual([1, 2]);
   });
-  it('停用：要原因；照服員只看到「已停用」不含內容；重新開放', async () => {
+  it('停用：要原因；照服員只看到「已停用」不含內容；重新開放由伺服器端檢查依據是否變更', async () => {
     expect((await nurse.rpc('stop_care_card', { p_case: C, p_note: '' })).error?.message).toMatch(/原因/);
     expect((await nurse.rpc('stop_care_card', { p_case: C, p_note: '住民轉院' })).error).toBeNull();
     const r = await cardFn(care2, { case_id: C });
     expect(r.card).toMatchObject({ status: '已停用', end_note: '住民轉院', content: null });
     expect((await care2.from('care_cards').select('v').eq('case_id', C)).data).toHaveLength(0);   // RLS：停用的卡不能直接讀內容
-    expect((await nurse.rpc('resume_care_card', { p_case: C })).error).toBeNull();
+    /* 前端不能直接呼叫舊的重新開放函式（會略過依據檢查） */
+    expect((await nurse.rpc('resume_care_card', { p_case: C })).error).not.toBeNull();
+    const resume = db => db.functions.invoke('care-card', { body: { action: 'resume', case_id: C } }).then(async r => r.error ? { status: r.error.context?.status } : r.data);
+    expect((await resume(nurse2)).status).toBe(403);
+    expect((await resume(staff)).status).toBe(403);
+    /* 停用期間依據改變（以開放時的快照不同來模擬）→ 不能重新開放，要改用修訂 */
+    const svc = service(), { data: k } = await svc.from('care_cards').select('id, basis').eq('case_id', C).eq('v', 2).single();
+    await svc.from('care_cards').update({ basis: { ...k.basis, allergy: '開放時的舊過敏資料' } }).eq('id', k.id);
+    const r1 = await resume(nurse);
+    expect(r1).toMatchObject({ ok: false }); expect(r1.reason).toMatch(/藥物過敏.*修訂內容/);
+    expect((await cards()).find(x => x.v === 2).status).toBe('已停用');
+    await svc.from('care_cards').update({ basis: k.basis }).eq('id', k.id);
+    expect(await resume(nurse)).toEqual({ ok: true, v: 2 });
     expect((await cardFn(care2, { case_id: C })).card.status).toBe('已開放');
+    expect((await svc.from('audit_logs').select('actor').eq('case_id', C).eq('action', '重新開放照顧摘要卡第 2 版').order('id', { ascending: false }).limit(1).single()).data.actor).toBe(ID.nurse);
   });
 });
