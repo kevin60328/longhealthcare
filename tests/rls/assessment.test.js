@@ -162,8 +162,35 @@ describe('習慣卡初審（review_habit）與收治評估（save_assessment）'
     expect((await service().rpc('habit_gate', { p_case: C })).data).toBe(true);
     const row = (await service().from('habit_reviews').select('*').eq('case_id', C).order('id').limit(1).single()).data;
     expect(row.state).toBe('有疑義／待確認');
+    /* 審核當時的醫療資料快照由資料庫計算（不採用畫面傳來的值） */
+    const cf = k => service().rpc('confirmed_field', { p_case: C, p_k: k }).then(r => r.data);
     const done = (await service().from('habit_reviews').select('snap, med_snapshot').eq('case_id', C).eq('state', '審核完成').single()).data;
-    expect(done).toEqual({ snap: { call: '阿嬤', famAllergy: '盤尼西林' }, med_snapshot: { allergy: '無已知過敏' } });
+    expect(done).toEqual({ snap: { call: '阿嬤', famAllergy: '盤尼西林' }, med_snapshot: { allergy: await cf('allergy'), tube: await cf('tube'), swallow: await cf('swallow') } });
+    expect(done.med_snapshot.swallow).toBe('需軟質或剁碎');
+  });
+  it('審核完成後已確認的吞嚥資料改變 → 需重新確認（資料庫擋下評估）；「護理已閱」不改變審核狀態；重新審核後通過', async () => {
+    const model = async () => {
+      const svc = service();
+      const [m, profiles, org, catalog] = await Promise.all([svc.rpc('get_case_models', { p_case: C, p_include_closed: true }), svc.from('profiles').select('*'),
+        svc.from('org_settings').select('*').eq('id', 1).maybeSingle(), svc.from('doc_catalog').select('key, why, "where", on_demand').order('sort')]);
+      const { D: M } = assembleModel({ models: m.data, profiles: profiles.data, org: org.data, catalog: catalog.data, staff: [] }, null);
+      return createRules(M, { me: null, today: todayTW() }).habitState(M.cases[C]);
+    };
+    const hr = p => nurse.rpc('review_habit', { p_case: C, p_note: '', p_rev: 1, p_diff_res: [{ k: 'allergy', fam: '盤尼西林', conf: '無已知過敏', res: '以醫院為準' }], p_med: {}, ...p });
+    /* 吞嚥資料：行政要求補件 → 家屬上傳 → 護理核對為「管灌」 */
+    expect((await staff.rpc('request_documents', { p_case: C, p_docs: [D.swallow], p_other: '', p_other_medical: false, p_reason: '需要補充其他文件', p_note: '' })).error).toBeNull();
+    const v = await uploadChecked(fam, C, 'swallow', D.swallow);
+    expect((await nurse.rpc('complete_review', { p_doc: D.swallow, p_v: v, p_fields: { swallow: '管灌，不可由口進食' }, p_review: [], p_review_src: '人工輸入＋人工核對', p_labs: {}, p_dx: null })).error).toBeNull();
+    expect((await service().rpc('habit_gate', { p_case: C })).data).toBe(false);
+    expect(await model()).toBe('資料已變更，需重新確認');
+    expect((await hr({ p_state: '護理已閱' })).error).toBeNull();
+    expect((await service().rpc('habit_gate', { p_case: C })).data).toBe(false);
+    expect((await hr({ p_state: '審核完成', p_note: '已確認改為管灌' })).error).toBeNull();
+    expect((await service().rpc('habit_gate', { p_case: C })).data).toBe(true);
+    /* 審核完成後再按「護理已閱」：只是閱讀紀錄，狀態仍是審核完成（資料庫與畫面規則一致） */
+    expect((await hr({ p_state: '護理已閱' })).error).toBeNull();
+    expect((await service().rpc('habit_gate', { p_case: C })).data).toBe(true);
+    expect(await model()).toBe('審核完成');
   });
   it('評估：文件不齊擋下；文件齊全後：流程不符的結果、缺說明擋下；需補充 → 指定文件退回、建立補件、記錄指定文件；之後文件不齊再擋下', async () => {
     const a = p => nurse.rpc('save_assessment', { p_case: C, p_result: '收治', p_move: '一人協助', p_behav: '無明顯行為問題', p_iso: '不需要', p_dnr_state: '尚未另行確認', p_dnr_src: '', p_reason: '', p_docs: [], p_other: '', ...p });
@@ -196,12 +223,20 @@ describe('docs_ready 與 rules/core.js 的 docsReady 相同', () => {
       svc.from('org_settings').select('*').eq('id', 1).maybeSingle(), svc.from('doc_catalog').select('key, why, "where", on_demand').order('sort')]);
     const { D: M } = assembleModel({ models: models.data, profiles: profiles.data, org: org.data, catalog: catalog.data, staff: [] }, null);
     const R = createRules(M, { me: null, today: todayTW() });
-    const diff = [], seen = new Set();
+    const diff = [], seen = new Set(), gates = new Set();
     for (const c of Object.values(M.cases).filter(c => c.linkStatus === '已確認')){
       const got = (await svc.rpc('docs_ready', { p_case: c.id })).data, want = R.docsReady(c);
-      seen.add(want); if (got !== want) diff.push(`${c.no}：資料庫 ${got}，規則 ${want}`);
+      seen.add(want); if (got !== want) diff.push(`${c.no} docs_ready：資料庫 ${got}，規則 ${want}`);
+      /* 習慣卡初審通過、已確認醫療資料：與 habitGate、confirmedField 相同 */
+      const g = (await svc.rpc('habit_gate', { p_case: c.id })).data; gates.add(R.habitGate(c));
+      if (g !== R.habitGate(c)) diff.push(`${c.no} habit_gate：資料庫 ${g}，規則 ${R.habitGate(c)}`);
+      for (const k of ['allergy', 'tube', 'swallow', 'dx', 'meds']){
+        const v = (await svc.rpc('confirmed_field', { p_case: c.id, p_k: k })).data;
+        if (v !== R.confirmedField(c, k)) diff.push(`${c.no} ${k}：資料庫「${v}」，規則「${R.confirmedField(c, k)}」`);
+      }
     }
     expect(diff).toEqual([]);
     expect([...seen].sort()).toEqual([false, true]);
+    expect([...gates].sort()).toEqual([false, true]);
   }, 120000);
 });

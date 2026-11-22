@@ -90,10 +90,11 @@ export function buildCase(m, accounts){
   const secAt = Object.fromEntries((m.habit_sections || []).map(s => [s.sec, { at: toStamp(s.updated_at), by: s.updated_by }]));
   if (sub || dr) c.habit = { fmt: 2, data: (dr && dr.draft) || (sub ? sub.data : {}), rev: dr ? dr.draft_rev : (sub ? sub.rev : 0), updatedAt: toStamp(dr && dr.draft_updated_at), updatedBy: dr && dr.draft_updated_by,
     secAt, sub, subHist: subs.map(s => ({ n: s.n, rev: s.rev, at: s.at, ts: s.ts, by: s.by, legacy: s.legacy })) };
-  /* 習慣卡初審：最新一筆是目前狀態；最近一次「審核完成」是 done。資料庫「有疑義／待確認」＝原型的「有疑義」 */
+  /* 習慣卡初審：最新一筆「不是護理已閱」的紀錄是目前狀態（原型的「護理已閱」只記在歷程，不改變審核狀態）；
+   * 最近一次「審核完成」是 done。資料庫「有疑義／待確認」＝原型的「有疑義」 */
   const hrs = (m.habit_reviews || []).map(h => ({ state: h.state === '有疑義／待確認' ? '有疑義' : h.state, rev: h.rev, note: h.note || '', by: h.reviewed_by, at: toStamp(h.reviewed_at), ts: toTs(h.reviewed_at), diffRes: h.diff_res || [], snap: h.snap || {}, med: h.med_snapshot || {} }));
   if (hrs.length){
-    const last = hrs[hrs.length - 1], done = hrs.filter(h => h.state === '審核完成').slice(-1)[0];
+    const last = hrs.filter(h => h.state !== '護理已閱').slice(-1)[0] || {}, done = hrs.filter(h => h.state === '審核完成').slice(-1)[0];
     c.habitReview = { state: last.state, rev: last.rev, by: last.by, at: last.at, note: last.note,
       done: done ? { rev: done.rev, by: done.by, at: done.at, ts: done.ts, note: done.note, snap: done.snap, med: done.med, diffRes: done.diffRes } : undefined,
       hist: hrs.map(h => ({ state: h.state, note: h.note, rev: h.rev, by: h.by, at: h.at, ts: h.ts, diffRes: h.diffRes })) };
@@ -134,7 +135,7 @@ export function buildCase(m, accounts){
       needSetBy: lastNeed ? lastNeed.by || undefined : undefined, needSetAt: lastNeed ? toStamp(lastNeed.at) : undefined, needNote: lastNeed ? lastNeed.note || '' : '',
       needRole: lastNeed ? (lastNeed.role || (accounts[lastNeed.by] || {}).role || undefined) : undefined,
       needAsk: ask ? { by: ask.asked_by, at: toStamp(ask.asked_at), note: ask.note, doneAt: toStamp(ask.done_at), doneBy: ask.done_by || undefined } : undefined,
-      needHist: needs.map(h => ({ from: h.from_text, to: h.to_text, at: toStamp(h.at), by: h.by || undefined, role: h.role || undefined, note: h.note || '' })),
+      needHist: needs.map(h => ({ from: h.from_text, to: h.to_text, at: toStamp(h.at), ts: toTs(h.at), by: h.by || undefined, role: h.role || undefined, note: h.note || '' })),
       remind: rems.length ? { n: rems.length, at: toStamp(lastRem.at), due: lastRem.due || undefined } : null,
       returned: lastRet ? { v: lastRet.version_v, reason: lastRet.reason, note: lastRet.note_for_family || '', by: lastRet.by, at: toStamp(lastRet.at) } : null,
       req: reqs[reqs.length - 1] || null, reqHistory: reqs.slice(0, -1),
@@ -158,6 +159,11 @@ export function buildCase(m, accounts){
       }))
     };
   }
+  /* 摘要卡開放後，護理改變管路／傷口／吞嚥資料是否需要的判斷（原型 cardNeedChange；由需求判斷歷程推得，不另外存）。
+   * rules/core.js cardChanged 只看摘要卡開放之後的紀錄 */
+  c.cardNeedChange = Object.values(items).filter(i => ['tubeCare', 'woundCare', 'swallow'].includes(i.key))
+    .flatMap(i => (i.needHist || []).filter(h => h.role === 'nurse' && h.from !== h.to).map(h => ({ key: i.key, ts: h.ts || 0 })));
+
   /* 補件 Email 通知（每個正式補件一筆，id＝req_<補件 id>）：整理成原型 D.mail 的形狀（itemId、reqTs、docName、reason、due…） */
   const reqOf = {};
   for (const it of Object.values(items)) for (const q of [it.req, ...(it.reqHistory || [])]) if (q) reqOf[q.id] = { it, q };

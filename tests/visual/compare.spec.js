@@ -76,6 +76,9 @@ const SCREENS = [
   { key: '61-住民資料', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('resident', 'TEST-A')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/assessment.html?case=' + await caseIdOf('T-A')); } },
   { key: '62-醫療內容核對', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('review', 'TEST-A_summary')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/assessment.html?view=review&item=' + await docIdOf('T-A', 'summary')); } },
   { key: '63-收治評估', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('assess', 'TEST-B')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/assessment.html?view=assess&case=' + await caseIdOf('T-B')); } },
+  /* 階段 8：care-summary.html */
+  { key: '70-審核照顧摘要卡', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('card', 'TEST-C')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/care-summary.html?from=home&case=' + await caseIdOf('T-C')); } },
+  { key: '71-照服員看摘要卡', seed: true, proto: async p => { await protoLogin(p, 'care@example.com'); await p.evaluate("go('card', 'TEST-D')"); }, neu: async p => { await login(p, 'care@example.com'); await p.goto('/care-summary.html?case=' + await caseIdOf('T-D')); } },
   { key: '13-修改密碼', proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('password')"); },
     neu: async p => { await login(p, 'family@example.com'); await p.waitForURL(/dashboard/); await p.goto('/login.html?view=password'); } }
 ];

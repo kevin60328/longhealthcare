@@ -125,6 +125,9 @@
 | 7 | `save_supp` | 護理補充評估（醫院沒有提供獨立紀錄時；記錄來源，不當成醫院文件） |
 | 7 | `dx_import`、`dx_save`、`dx_resync` | 診斷清單（ICD-10-CM 只檢查格式；修改要帶畫面看到的原文，防止同時修改） |
 | 7 | `review_habit` | 習慣卡初審（以資料庫的正式提交為快照；版本不符擋下） |
+| 8 | `open_care_card`、`revise_care_card`、`discard_care_card`、`stop_care_card`、`resume_care_card` | 照顧摘要卡：開放（第一次新增；修訂時草稿轉開放、舊版標示已取代，同一交易；檢查開放條件 `card_allowed` 與照服員身分）、修訂草稿、放棄、停用、重新開放 |
+| 8 | `case_cards` | 承辦護理師讀取草稿與歷史版本內容 |
+| 8（後端） | `my_care_card` | 照服員讀自己的卡（Edge Function care-card 以 service role 呼叫，另依規則算出依據變更的欄位） |
 | 7 | `save_assessment` | 收治評估／入住前確認；每次送出前重新檢查承辦、利益衝突、文件齊全（`docs_ready`）、習慣卡初審（`habit_gate`）、簽約、目前沒有有效評估 |
 | 6（後端） | `ensure_req_mail`、`claim_mail_job`、`release_mail_job`、`finish_mail_job`、`req_event`、`ocr_start`、`ocr_finish` | 只給 Edge Function（send-mail、ocr）以 service role 呼叫 |
 | 測試 | `purge_test_data` | 只有後端金鑰能執行；只刪自動測試帳號（e2e-／rls-…@example.com）的案件與紀錄（回傳案件 id，檔案由腳本刪除） |
@@ -141,7 +144,7 @@
 
 `doc_status()`（文件狀態）、`doc_done()`、`req_event()`（補件事件是否開啟）、`docs_ready()`（文件齊全，階段 7）是 `js/modules/rules/core.js` 的 `status`、`isDone`、`mailReqEvent`、`docsReady` 的資料庫版本，給 RPC 檢查狀態、給 send-mail 判斷要不要寄。
 規則改了兩邊都要改；`tests/rls/documents.test.js`、`assessment.test.js` 會把所有進行中案件的每一份文件、每一筆補件、每一個案件拿兩邊逐筆比對，不一致就失敗。
-`habit_gate()` 只檢查「最新一次正式提交已審核完成」；「審核完成後已確認醫療資料改變」由畫面依規則判斷（見 PROGRESS 還沒做）。
+`habit_gate()`（習慣卡初審通過）與 `confirmed_field()`（已確認醫療資料）對應 `habitGate`、`confirmedField`：最新一次正式提交已審核完成，而且審核當時的過敏、管路、吞嚥快照與現在相同（000030）。
 
 ## 8. 檔案（Storage）
 
