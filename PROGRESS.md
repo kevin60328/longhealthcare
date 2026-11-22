@@ -15,8 +15,8 @@
 | 3 | dashboard.html：家屬首頁、我的申請、通知；行政／護理個案資料夾；照服員我的住民；待辦徽章 | ✅ 完成 |
 | 4 | application.html：申請、案件詳情、同意書與代理權、緊急聯絡人、習慣卡 | ✅ 完成 |
 | 5 | cases.html：案件列表與詳情、確認轉交、分配、代理權核實、簽約、協調與結案、參訪與保證金 | ✅ 完成 |
-| 6 | documents.html＋Storage＋Email 模擬＋OCR | ⏭ 下一步 |
-| 7 | assessment.html | 未開始 |
+| 6 | documents.html＋Storage＋Email 模擬＋OCR | ✅ 完成 |
+| 7 | assessment.html | ⏭ 下一步 |
 | 8 | care-summary.html | 未開始 |
 | 9 | settings.html | 未開始 |
 | 10 | 全面驗收與部署到測試專案 | 未開始 |
@@ -114,30 +114,56 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 - **拆檔**：`js/modules/services/model-build.js`（純轉換，瀏覽器與 Edge Function 共用）＋ `model.js`（讀資料庫）。
 - 與原型畫面對照 4 組（案件列表、案件詳情、確認新申請、案件分配），版面一致；確認新申請改歸「工作清單」分頁（與原型相同）；測試案件匯入補上緊急聯絡人與建立紀錄。
 
+### 階段 6（documents.html、Storage、補件 Email、OCR）
+- **資料庫**（`000023_documents.sql`，修正 `000024`～`000027`）：
+  - 文件狀態函式 `doc_status()`、`doc_done()`、補件事件 `req_event()`：與 rules/core.js 的 status、isDone、mailReqEvent 同一套判斷（RPC 檢查狀態、send-mail 判斷要不要寄用），**測試逐筆比對兩邊一致**。
+  - 寫入 RPC：submit_version（家屬上傳；檔案位置要和版本相符、檔案要已在 Storage）、reuse_file（X 光沿用體檢報告、照護紀錄沿用 C／D 類檔案）、submit_inst_version（機構文件）、staff_receipt、mark_id_pending、confirm_doc_date、request_documents（全部檢查通過才寫入；選填改必備；清單外資料建 G 類文件）、remind_document（一般提醒，不是補件）、add_case_document、close_request_fix、open_document_file。狀態改變後自動處理補件：確認過期→系統補件並通知家屬；確認符合→關閉補件（家屬補傳不關閉）。
+  - 同一文件再提出補件時，舊的標成「被取代」（superseded_by，不是結案），與原型 reqHistory 相同；同時只有一筆開啟中。
+  - Storage 私有 bucket `case-files`：讀取／上傳 policy 與資料表同一套判斷；行政讀醫療類檔案前必須經過 open_document_file（每人每版本記一次操作紀錄，新表 `document_views`）。檔案只新增、不覆蓋。
+  - 修正（測試抓到）：`000024` open_document_file 變數撞名；`000025` 文件清單約束遇到空值會被當成通過；`000027` get_case_models 每份文件不再個別呼叫 can_read_document（結果相同，資料庫內約 0.1 秒）。
+- **Edge Functions**（已部署）：
+  - `send-mail`：補件 Email 認領→送出前再確認→回寫（HANDOFF 10.4 全部步驟）。郵件服務是**模擬**（不寄出），狀態「模擬已寄送（測試環境未實際寄出）」；正式介接只要換 mailSend。
+  - `ocr`：用 service role 讀檔案，呼叫 Claude（claude-opus-5-5，開啟 Anthropic 的 server-side fallback，避免醫療文件被安全分類器誤判拒絕），結果存 ocr_runs，日期模式寫入初步日期；失敗時說明原因、改人工。階段 6 只有「日期」「出生日期」兩種，護理逐欄核對在階段 7。
+  - Claude API key 由使用者在 Supabase 後台 Edge Functions → Secrets 設定（目前 access token 沒有 secrets 寫入權限）；`npm run functions:secrets` 是有權限時用的腳本。已比對後台雜湊與 .env.secrets 相同。
+- **畫面**（`js/modules/documents.js`）：家屬流程說明與完整文件清單、上傳（含沿用檔案）、已上傳；行政收件核對（簽約者另有畫面；出生日期民國／西元換算比對；可用 AI 讀出生日期）、核對日期（可用 AI 讀日期）、補件追蹤（再次提醒）、看文件、要求補件、新增其他文件、上傳機構文件、補件 Email。共用：`mail-ui.js`（案件頁也嵌入補件 Email 區塊）、`services/files.js`（上傳、10 分鐘有效的檔案網址；超過 4 MB 的照片先縮小）、`rules/receipt.js`、`rules/fields.js`（從原型逐字移轉）。家屬案件頁的補件進度顯示 Email 狀態。
+- **與原型不同（說明理由）**：
+  - 要求補件、新增其他文件、上傳機構文件：原型是案件頁的對話框，新版是 documents.html 的獨立頁（HANDOFF 6.2 的網址規劃；欄位與文字相同）。
+  - 日期 OCR 只讀「檢查日期」一個欄位（原型同時讀護理欄位，那部分在階段 7）；OCR 也支援 PDF（原型只有圖片）。
+  - 導覽列：收件核對、核對日期、補件追蹤歸「工作清單」，看文件、要求補件等歸「案件」，from=case／from=home 優先（對照原型修正階段 2 的規則與測試）。
+- 與原型畫面對照 7 組（流程說明、上傳、收件核對、核對日期、補件追蹤、看文件、要求補件）：版面一致。差異：測試案件沒有實際檔案（左邊顯示「沒有檔案」，E2E 已確認真實上傳會顯示圖片）；看文件頁少了「核對紀錄」卡（每欄 AI 原值與歷程，屬於階段 7 的護理核對資料）。
+- **測試設定**：E2E 同時 2 個瀏覽器（原本 4 個）。實測 4 個同時跑時，雲端免費方案資料庫偶爾超過 8 秒上限（statement timeout），造成隨機逾時；這是測試環境的限制。
+
 ---
 
-## 4. 測試狀態（2026/11/21 實際執行）
+## 4. 測試狀態（2026/11/22 實際執行）
 
 | 測試 | 結果 |
 |---|---|
 | 單元（`tests/unit`）：帳號格式、導覽列唯一選取、頁面權限＋**原型規則對照 316 個情境**＋個別規則＋Edge Function 副本一致（2） | 900 通過 |
+| 單元：階段 6 收件核對規則與核對欄位定義，**直接執行原型的同名函式逐一比對**（出生日期換算 22 種寫法、比對 12 種組合、各類文件核對欄位、fieldDefs）；導覽列規則更新 | 965 通過（含上一列） |
 | RLS＋RPC（`tests/rls`）：階段 4 寫入函式 14 項（建立申請、重複送出、住民沿用與資料不一致、格式檢查、權限、同意書、聯絡人、習慣卡提交規則、撤回、非本人簽署、人員名冊）；案件／文件隔離、護理只看 B/C/D、分配權限、預設拒絕寫入、操作紀錄不可改、註冊不能取得角色、bucket 私有、**正規化後的關聯與約束 13 項**、**跨案件一致性 3 項**、住民資料隔離（38）＋**資料庫→get_case_models→轉換→規則，4 筆測試案件 × 4 種身分與原型相同**（24）＋**階段 5 寫入函式 18 項**（確認、兩位行政同時確認、利益衝突、不受理、分配權限與同時分配、代理權核實、簽約、結案、協調四種結果、參訪、入住日、需求判斷、請護理重新判斷）＋清除測試資料的界線（3）＋分配者可見範圍（2）＋Edge Function case-phases（3：權限、階段與原型相同、只回傳階段名稱） | 101 通過 |
+| RLS：**階段 6**（`tests/rls/documents.test.js`）上傳與 Storage 權限（別的家屬不能上傳／讀、護理只讀承辦案件 B/C/D、行政讀醫療檔案要先開啟且只記一次）、收件核對、身分待確認、確認日期與過期補件、要求補件（護理判斷擋下、取代不結案）、一般提醒、補件自動關閉、沿用檔案、機構文件、新增文件、補件 Email 7 項（權限、建立失敗只建通知、sync 不重複、失敗重試、**兩人同時重試只寄一次**、**認領逾時與舊 send_key 不能寫回**、**結案與被取代不寄**）、OCR 權限、**doc_status 與 req_event 逐筆和規則比對** | 全部 127 通過（另 1 個是會產生費用的 OCR 實測，以 RUN_OCR_LIVE=1 單獨執行並通過：讀出樣本體檢報告日期 2026-11-05，與圖上相同） |
 | E2E（`tests/e2e`）：階段 2 的 45 條＋dashboard 12 條＋**階段 5 的 8 條**（案件列表、詳情、分配頁、權限；確認→分配→更換→參訪→家屬看到預約、協調→簽約→結案、利益衝突、不受理）＋**階段 4 的 6 條**（家屬完整流程、住民資料不一致與行政處理、監護人簽署、撤回同意、不同意、看不到別人的申請；寫入類放在 `tests/e2e/writes`，其他 E2E 跑完才執行） | 71 通過 |
-| 原型畫面對照（`tests/visual`） | 42 組截圖，人工比對後已修正差異 |
+| E2E：**階段 6** 6 條（家屬上傳→行政從工作清單收件核對（民國年出生日期）→要求補件→Email 模擬寄送→家屬看到補件進度與 Email 狀態；體檢報告填日期→收件→核對日期確認過期→補件追蹤與再次提醒；流程說明清單、看文件、各角色權限、補件追蹤） | 全部 77 條，連續兩次全部通過（同時 2 個瀏覽器） |
+| 原型畫面對照（`tests/visual`） | 42＋7 組截圖（階段 6 新增 7 組），人工比對後已修正或說明差異 |
 
 **需人工驗收**：用真實 Email 走一次「忘記密碼」，確認信中連結回到「設定新密碼」畫面（轉址設定無法自動測）。
 
 ---
 
 ## 5. 還沒做／已知限制
-- cases、documents、assessment、care-summary、settings 的內容還是「建置中」（階段 5～9）；工作清單與案件詳情的按鈕會連到這些頁面。
-- 所有寫入 RPC（建立申請、收件、補件、評估…）尚未建立；目前前端只能讀。
-- Storage policy 尚未建立（階段 6）。
+- assessment、care-summary、settings 的內容還是「建置中」（階段 7～9）；工作清單的護理核對、評估等按鈕會連到這些頁面。
+- 護理退回補件、護理判斷需要時自動補件（source 護理／護理判斷）在階段 7 做；send-mail 已能處理任何來源的補件。
+- OCR 護理逐欄核對模式（review）在階段 7 加入 Edge Function ocr。
+- 封存時刪除原始檔案（Storage）在階段 9（管理員）。
+- 上傳後如果建立版本失敗，Storage 會留下沒有版本的檔案（重試會沿用同一個檔案）；之後可由管理員功能清理。
 - 護理「已完成工作」：原型會列出**已移交給別人**的案件的處理摘要；正式版護理讀不到已移交的案件，所以目前不顯示。需要時可加一個只回傳摘要的 RPC。
 - 診斷清單的「標準化名稱」（原型 d.std）資料表還沒有欄位，階段 7 一併加入。
 - **不要同時跑 Vitest 和 Playwright**：一組結束時的自動清除，可能刪掉另一組正在用的暫時案件。
 - **Supabase access token 有效期限**（建立時選的天數）：過期後部署會失敗，要在後台重新產生並更新 .env.secrets。
-- 申請確認 Email 的「重新寄送」只記錄嘗試（測試環境未介接郵件服務），真正的寄送流程在階段 6（send-mail）。
+- **Claude API key**（OCR 用，Claude Console 個人帳號，名稱 longhealthcare-ocr）：**2027/1/31 到期**；帳號設定每月支出上限 US$10。到期前要產生新 key，更新 .env.secrets 的 ANTHROPIC_API_KEY 並重新設定 Edge Function secret。
+- 申請確認 Email 的「重新寄送」只記錄嘗試；補件 Email 由 send-mail 模擬寄送。正式郵件服務等使用者決定（待確認事項 3）。
+- OCR 費用算在使用者個人的 Claude Console 帳號（上限 US$10／月）；交件給客戶審查時要留意。
 - 行政用 application.html 會導到 cases.html（HANDOFF 寫「授權行政」也會用這頁，目前沒有原型對應畫面，有需要再確認）。
 - reference 的 Python 舊測試未移植（Python 未安裝；改寫成 JS 版 Playwright，逐階段移植）。
 
@@ -163,10 +189,12 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 7. 測試專案的 secret key 與資料庫密碼曾出現在對話中，放真實資料前要更換。
 8. ~~是否需要 Postgres 版的案件階段函式~~：分配頁改由 Edge Function 用同一份 JS 規則計算（2026/11/22）。
 9. ~~同一身分證字號資料不同~~：已決定（擋下並通知行政處理），階段 4 完成。
+10. **OCR 與個資同意（2026/11/22 提出）**：OCR 會把醫療文件影像傳給 Anthropic（Claude API）辨識。目前個資同意書寫「只提供給康和長照中心」，是否要在同意書補充「文件辨識委託外部服務處理」，需要客戶決定；放真實資料前要確認。
+11. Supabase access token 曾出現在截圖中，要撤銷並重新產生。**使用者決定（2026/11/22）：全部階段完成後再換**；換的時候順便確認新 token 有 Edge Functions Write 與 Secrets 權限。
 
 ---
 
-## 8. 下一步：階段 6（documents.html）
-- 上傳（Storage policy，私有 bucket，路徑與資料表用同一套權限）、收件核對、日期核對、補件與一般提醒、補件 Email（send-mail Edge Function，模擬寄送）、OCR（ocr Edge Function；Claude API key 只放在 Edge Function secrets，**需要使用者提供或決定**）、完整文件清單、文件檢視、行政新增其他文件、機構文件上傳。
-- 原型：familyUpload、familyUploaded、staffReceipt、staffSignerReceipt、staffDate、staffFollowup、docPage、reqMailCard、guide、shareSources（沿用體檢報告）。
-- cases.html 的「看文件／收件核對／要求補件／新增其他文件／上傳機構文件」連結已指向 documents.html 的對應網址。
+## 8. 下一步：階段 7（assessment.html）
+- 負責住民、照護文件需求判斷（判斷需要時自動建立補件；改判不需要時關閉未完成的補件，原型 syncNurseNeedReq）、醫療內容逐欄核對（AI 辨識 review 模式、核對草稿依文件＋版本、退回補件）、診斷清單（拆分、OCR 錯誤／不採用、同步）、習慣卡初審、收治評估（habitGate 守門）、入住前護理確認。
+- 原型：nurseResidents、nurseResident、nurseSupp、nurseReview、habitReviewBox、nurseAssess、dxCard；欄位定義已在 `js/modules/rules/fields.js`。
+- 看文件頁的「核對紀錄」卡（每欄 AI 原值、修改歷程）在這個階段補上。

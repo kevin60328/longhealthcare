@@ -11,8 +11,9 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: 'tests/e2e',
   globalTeardown: './tests/global-cleanup.js',
-  /* 測試連的是雲端 Supabase：同時太多瀏覽器會讓每頁載入超過預設的 5 秒等待。限制同時 4 個、等待放寬到 10 秒 */
-  workers: 4,
+  /* 測試連的是雲端 Supabase 免費方案（小型共用 CPU）：同時太多瀏覽器時，資料庫查詢會從 0.1 秒拖到數秒，甚至超過 8 秒上限。
+   * 階段 6 實測（2026/11/22）：4 個同時跑會偶發逾時，所以限制同時 2 個、等待放寬到 10 秒。這是測試環境的限制，不是功能問題 */
+  workers: 2,
   timeout: 60000,
   expect: { timeout: 10000 },
   use: { baseURL: 'http://127.0.0.1:5173' },

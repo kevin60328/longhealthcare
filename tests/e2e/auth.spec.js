@@ -41,11 +41,16 @@ test('沒有分配權限的護理師打開案件分配：沒有權限', async ({
   await expect(page.getByRole('heading', { name: '沒有權限' })).toBeVisible();
 });
 
-test('詳細頁歸到所屬分頁：行政看文件頁歸「案件」，帶 from=home 歸「工作清單」', async ({ page }) => {
+/* 與原型相同：收件核對、核對日期、補件追蹤在「工作清單」下；看文件在「案件」下；從案件頁進來（from=case）一律歸「案件」 */
+test('詳細頁歸到所屬分頁：收件核對歸「工作清單」、看文件歸「案件」，from=case／from=home 依來源', async ({ page }) => {
   await login(page, 'staff@example.com');
   await page.goto('/documents.html?view=receipt');
+  expect(await currentTab(page)).toBe('home');
+  await page.goto('/documents.html?view=receipt&from=case');
   expect(await currentTab(page)).toBe('cases');
-  await page.goto('/documents.html?view=receipt&from=home');
+  await page.goto('/documents.html?view=doc');
+  expect(await currentTab(page)).toBe('cases');
+  await page.goto('/documents.html?view=doc&from=home');
   expect(await currentTab(page)).toBe('home');
 });
 

@@ -18,6 +18,7 @@ import { supabase } from '../api/supabase.js';
 import { loadModel, invalidateModel, todayTW } from './services/model.js';
 import { esc, pill, helpLine, toast, modal, onSubmit, errText, purpose, setFlash, decorateRequired } from '../ui.js';
 import { accountCard, bindAccountCard, stepsBar, timelineCard } from './family-ui.js';
+import { reqMailWord } from './mail-ui.js';
 import { TONE, PHASE_TONE, FAMILY_WORD, SIGNER_LABEL, CATS, HABIT_SECS, HABIT_REQ, HABIT_LABEL_FAM, ADL_OPTS, slash, md, uiT, stampDate } from './rules/core.js';
 
 const P = (t, tone) => pill(t, tone || TONE[t] || 'mute');
@@ -213,7 +214,7 @@ function familyDocGroups(R, c, heroTodo){
     ${!todo.length && !pend.length && !wait.length && !done.length && !later.length ? '<p class="empty">目前沒有文件。</p>' : ''}</div>`;
 }
 
-async function caseHome({ main, R, M, c, org, me }){
+async function caseHome({ main, R, D, M, c, org, me }){
   const p = R.phase(c), list = R.myFamilyCases();
   const todo = R.activeItems(c).filter(i => R.familyTodo(i, c)), habTodo = R.habitFamTodo(c);
   const phone = esc(org?.phone || '');
@@ -241,7 +242,7 @@ async function caseHome({ main, R, M, c, org, me }){
   const reqCard = reqItems.length && !c.closed ? `<div class="card" id="reqCard"><h2>補件進度</h2><p class="small muted" style="margin:0">本中心正式提出的補件要求。重新上傳後，要等本中心確認問題已解決才會關閉。</p>${reqItems.map(i => { const rs = R.reqState(i, c), v = R.cur(i), after = !!v && (v.ts ? v.ts > (i.req.ts || 0) : String(v.at || '') > String(i.req.at || ''));
       return `<div class="todo" data-req="${esc(i.id)}"><div class="t-main"><div class="t-name">${esc(famName(i))}</div>
         <div class="t-why">原因：${esc(i.req.reason)}${i.req.note ? '（' + esc(i.req.note) + '）' : ''}　提出：${esc(i.req.source === '護理' ? '護理師' : i.req.source === '行政' ? '行政' : '系統')}${i.req.at ? '　要求時間：' + esc(i.req.at) : ''}${i.req.due ? '　期限：' + slash(i.req.due) : ''}</div>
-        <div class="t-why">${after ? `已重新上傳（第 ${v.v} 版，${esc(v.at)}）` : '尚未重新上傳'}　審核結果：${esc(FAMILY_WORD[R.status(i, c)] || R.status(i, c))}　Email 通知：（補件通知在文件頁處理）</div></div>${pill(rs === '已關閉' ? '已關閉' : rs, rs === '已關閉' ? 'ok' : rs === '已逾期' ? 'bad' : 'warn')}</div>`; }).join('')}</div>` : '';
+        <div class="t-why">${after ? `已重新上傳（第 ${v.v} 版，${esc(v.at)}）` : '尚未重新上傳'}　審核結果：${esc(FAMILY_WORD[R.status(i, c)] || R.status(i, c))}　Email 通知：${esc(reqMailWord((D.mail || {})['req_' + i.req.id]))}</div></div>${pill(rs === '已關閉' ? '已關閉' : rs, rs === '已關閉' ? 'ok' : rs === '已逾期' ? 'bad' : 'warn')}</div>`; }).join('')}</div>` : '';
   const withdraw = c.consent && !c.closed && R.consentOk(c) ? `<details class="card"><summary class="small">撤回資料授權同意</summary><p class="small">撤回後，機構會停止使用住民的資料，入住申請也會結束。撤回前已處理的資料依法不受影響。</p><button type="button" class="btn danger sm" id="withdrawBtn">撤回同意</button></details>` : '';
   const switcher = list.length > 1 ? `<label class="f small" style="max-width:320px">切換申請<select id="caseSwitch">${list.map(x => `<option value="${esc(x.id)}" ${x.id === c.id ? 'selected' : ''}>${esc(x.patient.name)}（${esc(x.no)}）</option>`).join('')}</select></label>` : '';
   const cs = R.consentState(c);

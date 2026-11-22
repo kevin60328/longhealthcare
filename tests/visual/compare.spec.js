@@ -12,6 +12,8 @@ import { login, service } from '../e2e/helpers.js';
 
 /* 新版的案件網址要用資料庫的 uuid：依案件編號查詢 */
 const caseIdOf = async no => (await service().from('cases').select('id').eq('no', no).single()).data.id;
+/* 文件的 uuid：依案件編號與文件 key 查詢 */
+const docIdOf = async (no, key) => (await service().from('documents').select('id').eq('case_id', await caseIdOf(no)).eq('key', key).single()).data.id;
 const DRAFT = { pname: '王美玉', nid: 'A223456789', birth: '1940-03-15', relation: '女兒', hospital: '仁心醫院', admit: '2026-12-20', token: 'compare' };
 
 /* 不放在 test-results：Playwright 每次執行會清空 test-results，只跑部分畫面時其他截圖會不見 */
@@ -61,6 +63,14 @@ const SCREENS = [
   { key: '41-案件詳情（評估中）', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('case', 'TEST-B')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/cases.html?case=' + await caseIdOf('T-B')); } },
   { key: '42-確認新申請', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('apply', 'C-0001-p4t8')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/cases.html?view=confirm&case=' + await caseIdOf('C-0001')); } },
   { key: '43-案件分配', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('assign')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/cases.html?view=assign'); } },
+  /* 階段 6：documents.html（原型的「要求補件」是案件頁上的對話框，新版改成獨立頁） */
+  { key: '50-申請流程說明', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('guide', 'TEST-A')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/documents.html?view=list&case=' + await caseIdOf('T-A')); } },
+  { key: '51-上傳文件', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("route.page = 'upload'; route.arg = 'TEST-A'; route.arg2 = 'TEST-A_exam'; render(true)"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/documents.html?view=upload&case=' + await caseIdOf('T-A') + '&item=' + await docIdOf('T-A', 'exam')); } },
+  { key: '52-收件核對', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('receipt', 'TEST-A_idcopy')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=receipt&item=' + await docIdOf('T-A', 'idcopy')); } },
+  { key: '53-核對日期', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('date', 'TEST-D_stool')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=date&item=' + await docIdOf('T-D', 'stool')); } },
+  { key: '54-補件追蹤', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('followup')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=followup&from=home'); } },
+  { key: '55-看文件', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('doc', 'TEST-D_summary')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=doc&from=case&item=' + await docIdOf('T-D', 'summary')); } },
+  { key: '56-要求補件', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('case', 'TEST-B')"); await p.locator('[data-act="staff-request"]').click(); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=request&from=case&case=' + await caseIdOf('T-B')); } },
   { key: '13-修改密碼', proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('password')"); },
     neu: async p => { await login(p, 'family@example.com'); await p.waitForURL(/dashboard/); await p.goto('/login.html?view=password'); } }
 ];

@@ -34,7 +34,13 @@ function parentTab(role, page, view, from){
   if (from === 'home') return 'home';
   if (role === 'family') return page === 'dashboard' && view === 'notices' ? 'notices' : 'home';
   /* 確認新申請屬於工作清單（原型 staffApply 在「工作清單」分頁下） */
-  if (role === 'staff') return page === 'cases' && view === 'confirm' ? 'home' : ['cases', 'documents', 'application'].includes(page) ? 'cases' : 'home';
+  if (role === 'staff'){
+    if (page === 'cases' && view === 'confirm') return 'home';
+    /* documents.html：從案件頁進來（from=case）歸「案件」；沒有來源時依畫面，與原型相同——
+     * 收件核對、核對日期、補件追蹤屬於「工作清單」（原型返回工作清單），看文件、要求補件等屬於「案件」 */
+    if (page === 'documents') return from === 'case' ? 'cases' : ['receipt', 'date', 'followup'].includes(view) ? 'home' : 'cases';
+    return ['cases', 'application'].includes(page) ? 'cases' : 'home';
+  }
   if (role === 'nurse'){
     if (page === 'cases' && view === 'assign') return 'assign';
     if (['assessment', 'care-summary', 'documents'].includes(page)) return 'residents';

@@ -111,7 +111,10 @@ export function buildCase(m, accounts){
   for (const d of m.documents || []){
     const id = `${cid}_${d.key}`;
     const returns = d.returns || [], reqs = (d.requests || []).map(q => ({ id: q.id, source: q.source, reason: q.reason, note: q.note || '', due: q.due || undefined,
-      at: toStamp(q.created_at), ts: toTs(q.created_at), by: q.created_by, uploadedAt: toStamp(q.uploaded_at), closedAt: toStamp(q.closed_at), closedBy: q.closed_fix_by || undefined, auto: q.auto }));
+      at: toStamp(q.created_at), ts: toTs(q.created_at), by: q.created_by, uploadedAt: toStamp(q.uploaded_at), closedAt: toStamp(q.closed_at),
+      closedBy: q.closed_by || q.closed_fix_by || undefined, closedFix: q.closed_fix_by || undefined, closedReason: q.closed_reason || undefined,
+      /* 被下一次補件取代（不是結案）：原型 setReq 把舊補件移到 reqHistory、沒有 closedAt */
+      supersededBy: q.superseded_by || undefined, auto: q.auto }));
     const lastRet = returns[returns.length - 1];
     /* 需求判斷：目前的判斷者＝歷程最新一筆（正規化後不另外存） */
     const needs = d.need_changes || [], lastNeed = needs[needs.length - 1];
@@ -130,9 +133,11 @@ export function buildCase(m, accounts){
       returned: lastRet ? { v: lastRet.version_v, reason: lastRet.reason, note: lastRet.note_for_family || '', by: lastRet.by, at: toStamp(lastRet.at) } : null,
       req: reqs[reqs.length - 1] || null, reqHistory: reqs.slice(0, -1),
       visible: d.visible === true,
+      /* 個案新增的文件（不在文件清單內）自己帶準備說明；清單內的文件在 assembleModel 從 doc_catalog 補上 */
+      why: d.custom_why || undefined, where: d.custom_where || undefined, custom: !d.catalog_key,
       versions: (d.versions || []).map(v => ({
         v: v.v, at: toStamp(v.uploaded_at), ts: toTs(v.uploaded_at), by: v.uploaded_by, phase: v.phase, provider: v.provider || undefined, note: v.note || '',
-        userDate: v.user_date || '', aiDate: v.date_prelim || '',
+        userDate: v.user_date || '', aiDate: v.date_prelim || '', idNote: v.id_note || undefined,
         idCheck: v.id_checked_at ? { ...(v.id_check_detail || {}), by: v.id_checked_by, at: toStamp(v.id_checked_at), how: v.id_check_how || '' } : undefined,
         dateConfirmed: v.date_confirmed || undefined, dateAt: toStamp(v.date_at), dateBy: v.date_by || undefined,
         adminOk: v.admin_ok === true, nurseOk: v.nurse_ok === true, nurseBy: v.nurse_by || undefined, nurseAt: toStamp(v.nurse_at), nurseTs: toTs(v.nurse_at),
@@ -140,11 +145,25 @@ export function buildCase(m, accounts){
         fields: v.facts || undefined,
         supp: v.supp_src != null ? { src: v.supp_src, note: v.supp_note || '', by: v.uploaded_by, at: toStamp(v.uploaded_at) } : undefined,
         fromItem: v.from_document_id ? { id: keyOf[v.from_document_id], v: v.from_version, name: nameOf[v.from_document_id] || '' } : undefined,
-        file: v.file_name || v.file_removed ? { name: v.file_name || '', removed: v.file_removed === true } : null
+        /* 檔案：path 是 Storage 的位置（只有看得到內容的角色才會拿到）；畫面要看檔案時用 open_document_file 取得短時效網址 */
+        file: v.file_name || v.file_removed || v.storage_path ? { name: v.file_name || '', type: v.mime || '', size: v.file_size || 0, path: v.storage_path || '', removed: v.file_removed === true } : null
       }))
     };
   }
-  return { c, items };
+  /* 補件 Email 通知（每個正式補件一筆，id＝req_<補件 id>）：整理成原型 D.mail 的形狀（itemId、reqTs、docName、reason、due…） */
+  const reqOf = {};
+  for (const it of Object.values(items)) for (const q of [it.req, ...(it.reqHistory || [])]) if (q) reqOf[q.id] = { it, q };
+  const mails = {};
+  for (const j of m.req_mails || []){
+    const x = reqOf[j.request_id]; if (!x) continue;
+    mails[j.id] = { id: j.id, kind: '補件通知', caseId: cid, itemId: x.it.id, reqId: j.request_id, reqTs: x.q.ts, to: j.to_email,
+      docName: x.it.famName || x.it.name, reason: x.q.reason, due: x.q.due || null,
+      /* 資料庫的狀態文字「模擬已寄送（測試環境未實際寄出）」→ 原型的狀態「模擬已寄送」（顯示時再加說明） */
+      status: String(j.status || '').replace(/（.*$/, ''), attempts: Number(j.attempts) || 0, lastError: j.last_error || null,
+      claim: j.claim_at ? { by: j.claim_by, at: toStamp(j.claim_at), ts: toTs(j.claim_at) } : null,
+      createdAt: toStamp(j.created_at), ts: toTs(j.created_at) };
+  }
+  return { c, items, mails };
 }
 
 /* 把查詢結果組成整個資料模型 D（形狀與原型相同）。
@@ -155,13 +174,14 @@ export function assembleModel(q, meProfile){
   const accounts = Object.fromEntries(staff.map(p => [p.id, { id: p.id, name: p.name, role: p.role, want: p.role, status: '啟用' }]));
   for (const p of profiles) accounts[p.id] = toAccount(p);
   const me = meProfile ? toAccount(meProfile) : null; if (me) accounts[me.id] = accounts[me.id] || me;
-  const D = { cases: {}, items: {}, accounts, notices: {}, docKeys: catalog.filter(r => !r.on_demand).map(r => r.key),
+  const D = { cases: {}, items: {}, accounts, notices: {}, mail: {}, docKeys: catalog.filter(r => !r.on_demand).map(r => r.key),
     settings: org ? { name: org.name, phone: org.phone, hours: org.hours, flowMode: org.flow_mode, requestDays: org.request_days, retentionDays: org.retention_days } : null };
   /* 文件的準備說明（為什麼需要、去哪裡拿）在文件清單；依 catalog_key 補上 */
   const help = Object.fromEntries(catalog.map(r => [r.key, r]));
   for (const m of models){
-    const { c, items } = buildCase(m, accounts); D.cases[c.id] = c;
+    const { c, items, mails } = buildCase(m, accounts); D.cases[c.id] = c;
     for (const it of Object.values(items)){ const h = help[it.catalogKey]; if (h){ it.why = h.why; it.where = h.where; } }
+    Object.assign(D.mail, mails);
     Object.assign(D.items, items);
   }
   return { D, me };

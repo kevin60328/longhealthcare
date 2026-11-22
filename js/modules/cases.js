@@ -9,12 +9,14 @@
  *
  * 寫入一律呼叫資料庫 RPC（migrations/…000014_cases.sql）：在一個交易內鎖定案件、檢查權限與狀態、寫入、通知家屬、記錄操作紀錄。
  * 兩位行政同時處理同一件事時，後到的人會看到「已經處理過了」之類的說明（使用者決定：多位行政共用工作清單）。
- * 文件的收件、日期核對、補件、上傳在 documents.html（階段 6）；這裡的相關按鈕連過去。 */
+ * 文件的收件、日期核對、補件、上傳在 documents.html（階段 6）；這裡的相關按鈕連過去。
+ * 補件 Email 通知區塊（原型 reqMailCard）與 documents.html?view=mail 共用 mail-ui.js。 */
 import { bootPage } from '../page.js';
 import { supabase } from '../api/supabase.js';
 import { loadModel, invalidateModel } from './services/model.js';
 import { esc, pill, toast, modal, purpose, errText, setFlash } from '../ui.js';
 import { timelineCard } from './family-ui.js';
+import { reqMailCard, bindReqMailCard } from './mail-ui.js';
 import { TONE, PHASE_TONE, ASSIGN_TONE, NEED_TONE, CATS, SIGNER_LABEL, PASS, slash, md, uiT, stampDate } from './rules/core.js';
 
 const P = (t, tone) => pill(t, tone || TONE[t] || 'mute');
@@ -168,7 +170,7 @@ function visitCard(c){
     <p class="small muted">只供記錄，<strong>不會阻擋入住流程</strong>。參訪是否必要依本中心規定，不是全國統一程序。保證金收據請在 F 類「保證金繳納紀錄／收據」上傳；系統不處理付款、退款或收費。</p></div>`;
 }
 
-async function casePage({ main, R, c }){
+async function casePage({ main, R, D, M, c }){
   const p = R.phase(c), canP = R.canProcess(c);
   const needContract = c.flowMode === '先簽後審' && !R.contractSigned(c) && R.consentOk(c) && !c.closed;
   const { data: logs } = await supabase().from('audit_logs').select('action, actor_name, at').eq('case_id', c.id).order('at', { ascending: false }).limit(12);
@@ -202,11 +204,13 @@ async function casePage({ main, R, c }){
     <p class="small muted">文件清單由系統內建。「視情況繳交」的文件請依住民狀況確認本案需要或不需要；尚未確認時不算齊全，也不算家屬缺件。選填文件上傳後一樣要審核。</p><div class="tbl-wrap"><table><thead><tr><th>文件</th><th>要求</th><th>狀態</th><th>版本</th><th></th></tr></thead><tbody>
     ${Object.keys(CATS).filter(key => items.some(i => R.catOf(i) === key)).map(key => `<tr class="cat"><th colspan="5">${key}. ${esc(CATS[key])}</th></tr>` + items.filter(i => R.catOf(i) === key).map(docRow).join('')).join('')}
     </tbody></table></div></div>
+    ${reqMailCard(R, D, c, M)}
   </div>
   ${visitCard(c)}
   <div style="margin-top:14px">${timelineCard(R, c)}</div>
   <div class="card" style="margin-top:14px"><h2>處理紀錄</h2>${(logs || []).length ? `<ul class="tasks">${logs.map(l => `<li class="task"><span class="small muted">${esc(fmt(l.at))}</span><div>${esc(l.action)}</div><span class="small muted">${esc(l.actor_name || '')}</span></li>`).join('')}</ul>` : '<p class="muted">尚無紀錄</p>'}</div>`;
   bindCase(main, R, c);
+  bindReqMailCard(main, c);
 }
 
 /* 依新的預計入住日，算出會變成「確認過期」的文件（給資料庫通知家屬用） */

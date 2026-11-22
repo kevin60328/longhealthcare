@@ -21,9 +21,12 @@ describe('選取分頁一定在顯示中的分頁清單裡（只會有一個）'
 describe('詳細頁歸到所屬分頁', () => {
   it('家屬通知', () => expect(navCurrent(me('family'), 'dashboard', 'notices')).toBe('notices'));
   it('家屬案件詳情歸我的申請', () => expect(navCurrent(me('family'), 'application', '')).toBe('home'));
-  it('行政文件頁歸案件；from=home 歸工作清單', () => {
-    expect(navCurrent(me('staff'), 'documents', 'receipt')).toBe('cases');
-    expect(navCurrent(me('staff'), 'documents', 'receipt', 'home')).toBe('home');
+  /* 階段 6 對照原型修正：收件核對、核對日期、補件追蹤在「工作清單」下；看文件、要求補件等在「案件」下；from 優先 */
+  it('行政文件頁：收件核對歸工作清單、看文件歸案件；from=case／from=home 依來源', () => {
+    for (const v of ['receipt', 'date', 'followup']) expect(navCurrent(me('staff'), 'documents', v)).toBe('home');
+    for (const v of ['doc', 'request', 'add', 'inst', 'mail']) expect(navCurrent(me('staff'), 'documents', v)).toBe('cases');
+    expect(navCurrent(me('staff'), 'documents', 'receipt', 'case')).toBe('cases');
+    expect(navCurrent(me('staff'), 'documents', 'doc', 'home')).toBe('home');
   });
   it('護理評估頁歸負責住民', () => expect(navCurrent(me('nurse'), 'assessment', '')).toBe('residents'));
   it('有分配權限的護理師在案件分配：只選案件分配', () => expect(navCurrent(me('nurse', { can_assign_nurse: true }), 'cases', 'assign')).toBe('assign'));

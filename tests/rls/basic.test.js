@@ -211,11 +211,14 @@ describe('正規化後的資料關聯（資料庫強制）', () => {
     const { error } = await svc().from('habit_reviews').insert({ case_id: tmp.id, rev: 5, state: '審核完成', reviewed_by: ID.nurse });
     expect(error?.code).toBe('23503');
   });
-  it('案件文件必須連到文件清單（G 類除外）', async () => {
+  /* 階段 6 起：行政「新增其他文件」可以選任何類別（原型 doc-add），所以個案新增的文件改以 key 前綴 custom_／extra_ 區分 */
+  it('案件文件必須連到文件清單（個案新增的 custom_／extra_ 文件除外）；清單內的文件不能另存準備說明', async () => {
     const bad = await svc().from('documents').insert({ case_id: tmp.id, key: 'notInCatalog', catalog_key: null, cat: 'A', name: 'x', stage: '評估前', need: '選填', medical: false });
     expect(bad.error).not.toBeNull();
-    const ok = await svc().from('documents').insert({ case_id: tmp.id, key: 'g_extra', catalog_key: null, cat: 'G', name: '其他補充文件', stage: '評估前', need: '選填', medical: false });
+    const ok = await svc().from('documents').insert({ case_id: tmp.id, key: 'custom_abc123', catalog_key: null, cat: 'C', name: '其他補充文件', stage: '評估前', need: '選填', medical: false, custom_why: '測試' });
     expect(ok.error).toBeNull();
+    const dup = await svc().from('documents').insert({ case_id: tmp.id, key: 'meds', catalog_key: 'meds', cat: 'C', name: '用藥', stage: '評估前', need: '必備', medical: true, custom_why: '不應該有' });
+    expect(dup.error).not.toBeNull();
   });
   it('摘要卡只能開放給照顧服務員', async () => {
     const { data: k } = await svc().from('care_cards').insert({ case_id: tmp.id, v: 1, status: '草稿' }).select('id').single();
