@@ -1,7 +1,7 @@
 # 開發進度（PROGRESS）
 
 > 每個階段結束時更新。開新對話時先讀 HANDOFF.md，再讀這份。
-> 最後更新：2026/11/21（階段 4 完成）
+> 最後更新：2026/11/22（階段 5 完成）
 
 ---
 
@@ -14,8 +14,8 @@
 | 2 | login.html、auth／permissions／navigation、頁面守門、導覽列 | ✅ 完成 |
 | 3 | dashboard.html：家屬首頁、我的申請、通知；行政／護理個案資料夾；照服員我的住民；待辦徽章 | ✅ 完成 |
 | 4 | application.html：申請、案件詳情、同意書與代理權、緊急聯絡人、習慣卡 | ✅ 完成 |
-| 5 | cases.html | ⏭ 下一步 |
-| 6 | documents.html＋Storage＋Email 模擬＋OCR | 未開始 |
+| 5 | cases.html：案件列表與詳情、確認轉交、分配、代理權核實、簽約、協調與結案、參訪與保證金 | ✅ 完成 |
+| 6 | documents.html＋Storage＋Email 模擬＋OCR | ⏭ 下一步 |
 | 7 | assessment.html | 未開始 |
 | 8 | care-summary.html | 未開始 |
 | 9 | settings.html | 未開始 |
@@ -43,7 +43,10 @@ npx playwright install chromium
 | `npm run test:unit` | 單元測試 |
 | `npm run test:rls` | RLS 權限測試＋資料庫→規則對照（會暫時改案件資料，**不要兩個人同時跑**） |
 | `npm run test:e2e` | E2E（Playwright） |
-| `npm run visual:compare` | 原型 v18 與新版截圖對照 → `test-results/compare/index.html` |
+| `npm run visual:compare` | 原型 v18 與新版截圖對照 → `visual-compare/index.html` |
+| `npm run db:clean-tests` | 清除自動測試帳號（e2e-／rls-…@example.com）建立的案件、紀錄與帳號（測試跑完會自動執行） |
+| `npm run functions:sync` | 把共用規則複製到 `supabase/functions/_shared/`（改了 rules/core.js 或 model-build.js 後要執行） |
+| `npm run functions:deploy` | 同步後部署 Edge Functions（需要 .env.secrets 的 SUPABASE_ACCESS_TOKEN） |
 
 Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8 碼且需英文字母與數字、Redirect URLs 加入 `http://127.0.0.1:5173/**` 與 `http://localhost:5173/**`、Site URL `http://localhost:5173/login.html`。
 
@@ -96,16 +99,31 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 - 與原型畫面對照 7 組（申請表、確認、待行政確認、文件審查中、同意書、聯絡人、習慣卡），差異已修正（必填星號位置、舊資料不顯示通知列）。對照截圖改存 `visual-compare/`（Playwright 每次會清空 test-results）。
 - 上傳文件、完整文件清單頁在 documents.html（階段 6）；案件詳情裡的上傳按鈕已連到那裡。
 
+### 階段 5（cases.html）
+- **RPC**（`…000014_cases.sql`、修正 `000016`）：confirm_case、reject_application、assign_nurse（帶「畫面看到的承辦人」防止同時分配互相覆蓋；更換要原因）、verify_proxy（證明文件完成收件核對才能確認）、record_signing、close_case、coordinate（可入住／重評／延期／取消）、update_admit、save_visit、set_document_need（行政判斷的視情況繳交文件）、ask_nurse_need、case_conflicts（利益衝突）。都在一個交易內鎖定案件、檢查狀態、通知家屬、記錄操作紀錄；兩位行政同時操作時後到的人被擋下。
+- **資料表**：cases 加 已拒絕、handover_at／by、closed_text；visits 改成 `case_visits`、`case_deposits`（每案一筆目前狀態）。
+- **畫面**（`js/modules/cases.js`）：案件列表（搜尋、篩選）、案件詳情（簽約、協調、代理權核實、基本資料、文件與要求、參訪與保證金、處理歷程、處理紀錄）、確認新申請／不受理、案件分配。文件的收件、補件、上傳按鈕連到 documents.html（階段 6）。家屬案件頁加上參訪預約提示。
+- **使用者決定（2026/11/22）**：
+  - 多位行政共用工作清單（不加承辦行政）。
+  - 案件分配頁的案件階段在伺服器端計算：Edge Function `supabase/functions/case-phases` 用同一份規則（`_shared/` 是 `npm run functions:sync` 複製的副本，`tests/unit/functions-sync.test.js` 檢查一致）。已部署（`npm run functions:deploy`，token 放在 .env.secrets）。分配頁先畫出整頁、階段欄「讀取中」，算好再填上；取不到時顯示「無法取得」並說明。
+  - 修正（測試抓到）：`000020`、`000021` 讓 service role 能讀到案件與完整文件內容，否則伺服器算出的階段與原型不同。
+  - 測試資料清除：`purge_test_data()`（`000019`）只有後端金鑰能執行、只刪自動測試帳號的資料；其他操作紀錄仍不能刪改（有測試）。Playwright 與 Vitest 跑完自動清除。
+- **權限調整**（`000018`）：有分配權限的護理師看得到所有「已確認、進行中」案件的基本資料（才能更換承辦），文件仍看不到。
+- **效能**：`000017` get_case_models 預設只讀進行中的案件（「已完成工作」與案件列表的已結案篩選才讀全部）；`000022` 每份文件只檢查一次可見性（約快 3 成）。
+- **測試設定**：Playwright 同時 4 個、等待 10 秒（寫入類 15 秒、單條 3 分鐘），因為連雲端偶爾較慢；`tests/rls/functions.test.js` 檢查 Edge Function 權限與算出的階段與原型相同。
+- **拆檔**：`js/modules/services/model-build.js`（純轉換，瀏覽器與 Edge Function 共用）＋ `model.js`（讀資料庫）。
+- 與原型畫面對照 4 組（案件列表、案件詳情、確認新申請、案件分配），版面一致；確認新申請改歸「工作清單」分頁（與原型相同）；測試案件匯入補上緊急聯絡人與建立紀錄。
+
 ---
 
 ## 4. 測試狀態（2026/11/21 實際執行）
 
 | 測試 | 結果 |
 |---|---|
-| 單元（`tests/unit`）：帳號格式、導覽列唯一選取、頁面權限（577）＋**原型規則對照 316 個情境**＋個別規則（5） | 898 通過 |
-| RLS＋RPC（`tests/rls`）：階段 4 寫入函式 14 項（建立申請、重複送出、住民沿用與資料不一致、格式檢查、權限、同意書、聯絡人、習慣卡提交規則、撤回、非本人簽署、人員名冊）；案件／文件隔離、護理只看 B/C/D、分配權限、預設拒絕寫入、操作紀錄不可改、註冊不能取得角色、bucket 私有、**正規化後的關聯與約束 13 項**、**跨案件一致性 3 項**、住民資料隔離（38）＋**資料庫→get_case_models→轉換→規則，4 筆測試案件 × 4 種身分與原型相同**（24） | 76 通過 |
-| E2E（`tests/e2e`）：階段 2 的 45 條＋dashboard 12 條＋**階段 4 的 6 條**（家屬完整流程、住民資料不一致與行政處理、監護人簽署、撤回同意、不同意、看不到別人的申請；放在 `tests/e2e/writes`，其他 E2E 跑完才執行） | 63 通過 |
-| 原型畫面對照（`tests/visual`） | 38 組截圖，人工比對後已修正差異 |
+| 單元（`tests/unit`）：帳號格式、導覽列唯一選取、頁面權限＋**原型規則對照 316 個情境**＋個別規則＋Edge Function 副本一致（2） | 900 通過 |
+| RLS＋RPC（`tests/rls`）：階段 4 寫入函式 14 項（建立申請、重複送出、住民沿用與資料不一致、格式檢查、權限、同意書、聯絡人、習慣卡提交規則、撤回、非本人簽署、人員名冊）；案件／文件隔離、護理只看 B/C/D、分配權限、預設拒絕寫入、操作紀錄不可改、註冊不能取得角色、bucket 私有、**正規化後的關聯與約束 13 項**、**跨案件一致性 3 項**、住民資料隔離（38）＋**資料庫→get_case_models→轉換→規則，4 筆測試案件 × 4 種身分與原型相同**（24）＋**階段 5 寫入函式 18 項**（確認、兩位行政同時確認、利益衝突、不受理、分配權限與同時分配、代理權核實、簽約、結案、協調四種結果、參訪、入住日、需求判斷、請護理重新判斷）＋清除測試資料的界線（3）＋分配者可見範圍（2）＋Edge Function case-phases（3：權限、階段與原型相同、只回傳階段名稱） | 101 通過 |
+| E2E（`tests/e2e`）：階段 2 的 45 條＋dashboard 12 條＋**階段 5 的 8 條**（案件列表、詳情、分配頁、權限；確認→分配→更換→參訪→家屬看到預約、協調→簽約→結案、利益衝突、不受理）＋**階段 4 的 6 條**（家屬完整流程、住民資料不一致與行政處理、監護人簽署、撤回同意、不同意、看不到別人的申請；寫入類放在 `tests/e2e/writes`，其他 E2E 跑完才執行） | 71 通過 |
+| 原型畫面對照（`tests/visual`） | 42 組截圖，人工比對後已修正差異 |
 
 **需人工驗收**：用真實 Email 走一次「忘記密碼」，確認信中連結回到「設定新密碼」畫面（轉址設定無法自動測）。
 
@@ -117,7 +135,8 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 - Storage policy 尚未建立（階段 6）。
 - 護理「已完成工作」：原型會列出**已移交給別人**的案件的處理摘要；正式版護理讀不到已移交的案件，所以目前不顯示。需要時可加一個只回傳摘要的 RPC。
 - 診斷清單的「標準化名稱」（原型 d.std）資料表還沒有欄位，階段 7 一併加入。
-- **測試留下的資料**：有操作紀錄的案件依規則不能刪除，所以自動測試建立的案件會「結案」、暫時帳號會「停用」，留在測試專案裡（不影響待辦與徽章）。
+- **不要同時跑 Vitest 和 Playwright**：一組結束時的自動清除，可能刪掉另一組正在用的暫時案件。
+- **Supabase access token 有效期限**（建立時選的天數）：過期後部署會失敗，要在後台重新產生並更新 .env.secrets。
 - 申請確認 Email 的「重新寄送」只記錄嘗試（測試環境未介接郵件服務），真正的寄送流程在階段 6（send-mail）。
 - 行政用 application.html 會導到 cases.html（HANDOFF 寫「授權行政」也會用這頁，目前沒有原型對應畫面，有需要再確認）。
 - reference 的 Python 舊測試未移植（Python 未安裝；改寫成 JS 版 Playwright，逐階段移植）。
@@ -132,6 +151,8 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 - get_case_models 會回傳診斷的文字與狀態給行政與家屬（只為了計算摘要卡依據是否變更），diagnoses 表本身仍只有承辦護理能直接讀。
 - 家屬「帳號與通知設定」的 Email 標籤一律顯示「測試環境尚未介接」（原型對 seed 帳號顯示「尚未驗證」、對新註冊帳號顯示「測試環境尚未介接」）。
 
+- **多位行政（2026/11/22 使用者決定）**：維持原型的共用工作清單，不加「承辦行政」。所有行政看到同一份待辦與徽章；兩人同時處理同一件事時，由資料庫鎖定與狀態檢查擋下後到的人（之後各階段的寫入 RPC 都要照這個做法）；處理歷程記錄實際操作人。利益衝突案件（selfConflict）由其他行政處理。
+
 ## 7. 待確認事項
 1. 頁尾文字（HANDOFF 15-1）：目前暫定「目前為測試環境：資料存放於 Supabase 測試專案，非正式服務。（頁尾文字待確認）」，在 `.env` 的 `VITE_ENV_NOTE`。
 2. FHIR 交換介接是否保留（15-2）。
@@ -140,13 +161,12 @@ Supabase 後台已設定（2026/11/21）：Confirm email 關閉、密碼至少 8
 5. C-0003 劉春梅：等階段 4 用正常流程建立，還是另有資料？
 6. 部署方式與網域（15-8）；部署時要把正式網址加進 Supabase Redirect URLs。
 7. 測試專案的 secret key 與資料庫密碼曾出現在對話中，放真實資料前要更換。
-8. 是否需要 Postgres 版的案件階段函式（見第 6 節）。
+8. ~~是否需要 Postgres 版的案件階段函式~~：分配頁改由 Edge Function 用同一份 JS 規則計算（2026/11/22）。
 9. ~~同一身分證字號資料不同~~：已決定（擋下並通知行政處理），階段 4 完成。
 
 ---
 
-## 8. 下一步：階段 5（cases.html）
-- 行政：案件列表與搜尋、案件詳情、確認申請並轉交護理（confirm_case；電話確認、病歷號、預計入住日、文件繳交期限、通知家屬）、代理權核實（verify_proxy）、記錄簽約（record_signing）、參訪與保證金、協調與結案、處理歷程。
-- 有分配權限的護理：案件分配（assign_nurse；更換要原因，保留歷程；一般護理師直接呼叫 RPC 也不能分配）。
-- 原型：staffCases、staffCase、staffApply、nurseAssignPage、assignHtml、selfConflict（利益衝突提示）。
-- 完成後跑 visual:compare 對照原型。
+## 8. 下一步：階段 6（documents.html）
+- 上傳（Storage policy，私有 bucket，路徑與資料表用同一套權限）、收件核對、日期核對、補件與一般提醒、補件 Email（send-mail Edge Function，模擬寄送）、OCR（ocr Edge Function；Claude API key 只放在 Edge Function secrets，**需要使用者提供或決定**）、完整文件清單、文件檢視、行政新增其他文件、機構文件上傳。
+- 原型：familyUpload、familyUploaded、staffReceipt、staffSignerReceipt、staffDate、staffFollowup、docPage、reqMailCard、guide、shareSources（沿用體檢報告）。
+- cases.html 的「看文件／收件核對／要求補件／新增其他文件／上傳機構文件」連結已指向 documents.html 的對應網址。

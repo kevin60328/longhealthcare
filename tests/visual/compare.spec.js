@@ -56,6 +56,11 @@ const SCREENS = [
   { key: '34-同意書', seed: true, proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('consent', 'C-0001-p4t8')"); }, neu: async p => { await login(p, 'family@example.com'); await p.goto('/application.html?view=consent&case=' + await caseIdOf('C-0001')); } },
   { key: '35-緊急聯絡人', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('contacts', 'TEST-A')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/application.html?view=contacts&case=' + await caseIdOf('T-A')); } },
   { key: '36-習慣卡', seed: true, proto: async p => { await protoLogin(p, 'family3@example.com'); await p.evaluate("go('life', 'TEST-A')"); }, neu: async p => { await login(p, 'family3@example.com'); await p.goto('/application.html?view=habit&case=' + await caseIdOf('T-A')); } },
+  /* 階段 5：cases.html */
+  { key: '40-行政案件列表', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('cases')"); }, neu: async p => { await p.addInitScript(() => sessionStorage.removeItem('caseQ')); await login(p, 'staff@example.com'); await p.goto('/cases.html'); } },
+  { key: '41-案件詳情（評估中）', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('case', 'TEST-B')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/cases.html?case=' + await caseIdOf('T-B')); } },
+  { key: '42-確認新申請', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('apply', 'C-0001-p4t8')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/cases.html?view=confirm&case=' + await caseIdOf('C-0001')); } },
+  { key: '43-案件分配', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('assign')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/cases.html?view=assign'); } },
   { key: '13-修改密碼', proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('password')"); },
     neu: async p => { await login(p, 'family@example.com'); await p.waitForURL(/dashboard/); await p.goto('/login.html?view=password'); } }
 ];

@@ -166,7 +166,8 @@ function applied({ main, R, M, c, org }){
 }
 
 /* ========== 案件詳情（原型 familyHome） ========== */
-const CLOSED_TEXT = (c, org) => c.closedType === '撤回' ? '機構已停止使用住民的資料，並依保存規則處理。如需重新申請，請來電：' + (org?.phone || '')
+/* 結案說明：行政結案時寫在 closed_text；家屬自己撤回或不同意時依類型顯示 */
+const CLOSED_TEXT = (c, org) => c.closed.text ? c.closed.text : c.closedType === '撤回' ? '機構已停止使用住民的資料，並依保存規則處理。如需重新申請，請來電：' + (org?.phone || '')
   : c.closedType === '不同意' ? '機構無法進行評估。如果改變心意，請來電：' + (org?.phone || '') : (c.closed.reason || '');
 const FAMILY_NEED_FN = R => it => it.key === 'contract' ? ['機構提供，簽約時完成', 'info'] : R.instDoc(it) ? ['機構提供', 'info'] : R.notApplicable(it) ? ['本案不需繳交', 'mute'] : R.needOf(it) === '選填' ? ['選填', 'info'] : R.condPending(it) ? [R.nurseCond(it) ? '待護理確認' : '視情況繳交', 'warn'] : R.nurseCond(it) ? ['本案需要繳交', 'bad'] : ['需要繳交', 'bad'];
 const famName = i => uiT(i.famName || i.name);
@@ -251,7 +252,7 @@ async function caseHome({ main, R, M, c, org, me }){
     <p class="lead">預計入住日：${slash(c.plannedAdmit)}　申請編號 <span class="mono">${esc(c.no)}</span>${c.createdAt ? `　送出：${esc(c.createdAt)}` : ''}</p>
     ${c.linkStatus === '已確認' ? `<p class="row" style="gap:8px;margin:-4px 0 12px" id="consentLine">資料授權：${pill(({ '未簽署': '未授權', '有效': '已授權', '已撤回': '已撤回' })[cs] || cs, ({ '未簽署': 'warn', '有效': 'ok', '已撤回': 'mute' })[cs] || 'warn')}　入住契約：${pill(R.contractSigned(c) ? '已簽約' : '尚未簽約', R.contractSigned(c) ? 'ok' : 'mute')}</p>` : ''}
     ${c.closed || p === '待機構確認' ? '' : `<h2 style="font-size:1rem;margin:0 0 8px">我的申請進度</h2>${stepsBar(R, c)}`}
-    <div class="stack">${hero}${reqCard}${notices}${docList}${timelineCard(R, c)}${withdraw}${accountCard(M)}</div>${helpLine(org)}</div>`;
+    <div class="stack">${hero}${reqCard}${notices}${docList}${visitLine(c, org)}${timelineCard(R, c)}${withdraw}${accountCard(M)}</div>${helpLine(org)}</div>`;
   bindAccountCard(main, M);
   bindMailLine(main, c, () => location.reload());
   main.querySelector('#caseSwitch')?.addEventListener('change', e => location.assign(`application.html?case=${e.target.value}`));
@@ -419,4 +420,6 @@ function habitPage(x){
     invalidateModel(); setFlash(`已正式提交（第 ${data} 次），待護理初審`); location.assign(caseUrl(c));
   });
 }
+/* 參訪預約（行政在案件頁登錄；原型 visitLine） */
+const visitLine = (c, org) => { const v = c.visit || {}; return v.date && !c.closed ? `<div class="notice info small">參訪預約：${slash(v.date)} ${esc(v.time)}（${esc(v.status)}）。如需改期請來電 ${esc(org?.phone || '')}。</div>` : ''; };
 const filled = v => Array.isArray(v) ? v.length > 0 : String(v == null ? '' : v).trim() !== '';

@@ -1,7 +1,7 @@
 # 資料庫設計說明
 
 > 給組員與接手的人看的：資料表之間的關聯、正規化做到哪裡、哪些地方是刻意保留的例外、資料庫本身會擋下哪些錯誤。
-> 實際定義以 `supabase/migrations/` 為準（依檔名順序套用）。最後更新：2026/11/21（000013，階段 4）。
+> 實際定義以 `supabase/migrations/` 為準（依檔名順序套用）。最後更新：2026/11/22（000019，階段 5）。
 
 ## 1. 正規化原則
 
@@ -32,7 +32,8 @@
 | `case_assignments` | 承辦護理分配歷程 | → `cases`、`profiles` |
 | `contacts` | 緊急聯絡人 | → `cases` |
 | `consents` | 個資同意（每次簽署一列） | → `cases`、`profiles`、`documents`（代理權證明） |
-| `visits` | 參訪與保證金紀錄 | → `cases`、`profiles` |
+| `case_visits` | 參訪：每案一筆目前狀態（修改經過記在操作紀錄） | → `cases`、`profiles` |
+| `case_deposits` | 保證金：每案一筆目前狀態（只記錄，不處理付款） | → `cases`、`profiles` |
 | `retention_holds` | 延長保存 | → `cases`、`profiles` |
 
 ### 文件
@@ -94,7 +95,7 @@
 - 摘要卡開放給照服員以外的人
 - 非 G 類文件沒有連到文件清單
 - Email 工作同時指向案件與補件，或兩者都沒有
-- 修改或刪除操作紀錄（連 service role 也不行）
+- 修改或刪除操作紀錄（連 service role 也不行；唯一例外是 `purge_test_data` 執行期間、而且只限自動測試帳號的紀錄）
 - **跨案件的矛盾資料**（000010）：代理權證明、診斷來源文件、沿用的文件檔案，都必須屬於同一個案件（前兩者用「文件＋案件」複合外鍵，第三個用觸發器）
 
 ## 5. 寫入方式（RPC，一個交易內完成）
@@ -107,6 +108,11 @@
 | 4 | `sign_consent`、`withdraw_consent`、`decline_consent` | 個資同意；非本人簽署時加入代理權證明文件 |
 | 4 | `save_contacts`、`save_habit_section`、`submit_habit`、`resend_apply_mail` | 聯絡人、習慣卡、申請確認通知 |
 | 4 | `resolve_resident_conflict` | 行政處理住民資料不一致 |
+| 5 | `confirm_case`、`reject_application` | 確認並轉交護理（設定繳交期限、通知家屬）／不受理 |
+| 5 | `assign_nurse` | 指定或更換承辦（帶畫面看到的舊承辦人，防止同時分配；更換要原因） |
+| 5 | `verify_proxy`、`record_signing`、`close_case`、`coordinate`、`update_admit`、`save_visit` | 代理權核實、簽約、結案、協調、入住日、參訪與保證金 |
+| 5 | `set_document_need`、`ask_nurse_need` | 行政判斷視情況繳交文件、請護理重新判斷 |
+| 測試 | `purge_test_data` | 只有後端金鑰能執行；只刪自動測試帳號（e2e-／rls-…@example.com）的案件與紀錄 |
 
 每個 RPC 都會先檢查身分與案件狀態，失敗就整筆不寫入。
 

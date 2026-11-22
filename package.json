@@ -17,7 +17,10 @@
     "db:push": "node scripts/db-push.mjs",
     "visual:compare": "playwright test --config playwright.visual.config.js",
     "parity:gen": "playwright test --config playwright.parity.config.js",
-    "db:seed-cases": "node scripts/seed-test-cases.mjs"
+    "db:seed-cases": "node scripts/seed-test-cases.mjs",
+    "functions:sync": "node scripts/sync-functions.mjs",
+    "functions:deploy": "npm run functions:sync && node scripts/deploy-functions.mjs",
+    "db:clean-tests": "node scripts/clean-test-data.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",

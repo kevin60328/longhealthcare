@@ -58,6 +58,11 @@ for (const [n, { c, items }] of bases.entries()){
   for (const h of c.assignHist || []) must(await db.from('case_assignments').insert({ case_id: cid, nurse_id: uid(h.to), from_nurse_id: uid(h.from), by: uid(h.by), at: iso(h.at), reason: h.reason || null }), '分配歷程');
   if (c.nurseId && !(c.assignHist || []).length) must(await db.from('case_assignments').insert({ case_id: cid, nurse_id: uid(c.nurseId), by: null, at: null, reason: '舊資料：分配時間未記錄' }), '承辦護理師');
 
+  /* 緊急聯絡人與建立紀錄（原型 seedTestCase 寫入 contacts 與一筆「建立測試資料」操作紀錄） */
+  const cts = (c.contacts || []).map((x, n) => ({ case_id: cid, name: x.name, rel: x.rel || '', phone: x.phone, sort: n, updated_by: uid(c.familyId) }));
+  if (cts.length) must(await db.from('contacts').insert(cts), '緊急聯絡人');
+  must(await db.from('audit_logs').insert({ case_id: cid, actor: uid('admin@example.com'), actor_name: nameOf('admin@example.com'), role: 'admin', action: `建立測試資料：${c.test ? c.test.label : c.no}（僅供測試）`, family_visible: false }), '操作紀錄');
+
   /* 3. 個資同意 */
   if (c.consent) must(await db.from('consents').insert({ case_id: cid, ver: c.consent.ver || 1, signer_type: c.consent.signer, signer_name: c.consent.signerName || nameOf(c.consent.by),
     signed_by: uid(c.consent.by), signed_at: iso(c.consent.at), state: '有效', emergency: !!c.consent.emergency, photo: !!c.consent.photo }), '個資同意');

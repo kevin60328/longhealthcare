@@ -87,7 +87,17 @@ describe('承辦護理只看 B、C、D 類', () => {
     const { data } = await U.nurse2.from('documents').select('cat').eq('case_id', tmp.id);
     expect([...new Set(data.map(r => r.cat))].sort()).toEqual(['B', 'C', 'D']);
   });
-  it('黃護理師（有分配權限）看不到已分配給別人的案件', async () => { expect(await nos(U.nurse)).not.toContain(tmp.no); });
+  /* 2026/11/22：分配權限包含更換承辦，所以看得到已分配給別人的案件基本資料（000018），但文件看不到 */
+  it('黃護理師（有分配權限）看得到已分配給別人的案件，但看不到它的文件', async () => {
+    expect(await nos(U.nurse)).toContain(tmp.no);
+    const { data } = await U.nurse.from('documents').select('id').eq('case_id', tmp.id);
+    expect(data).toEqual([]);
+  });
+  it('一般護理師看不到別人承辦的案件', async () => {
+    const t2 = await tempCase({ docs: ['summary'], nurse: 'nurse' });
+    expect(await nos(U.nurse2)).not.toContain(t2.no);
+    await t2.remove();
+  });
 });
 
 describe('有分配權限的護理師看得到待分配案件', () => {

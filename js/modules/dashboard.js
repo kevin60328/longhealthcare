@@ -30,7 +30,8 @@ const store = {
 
 bootPage('dashboard', async ({ main, me, view, params, shell, org }) => {
   if (me.role === 'care') return careHome(main);
-  const { D, R, me: M } = await loadModel(me);
+  /* 「已完成工作」要包含已結案案件的處理紀錄（原型 doneWork 只排除封存），其他畫面只需要進行中的案件 */
+  const { D, R, me: M } = await loadModel(me, { includeClosed: params.get('tab') === 'done' });
   const ctx = { D, R, M, org, main, shell, params };
   if (me.role === 'family'){
     if (view === 'notices') return familyNotices(ctx);

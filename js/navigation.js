@@ -33,7 +33,8 @@ export function navTabs(me){
 function parentTab(role, page, view, from){
   if (from === 'home') return 'home';
   if (role === 'family') return page === 'dashboard' && view === 'notices' ? 'notices' : 'home';
-  if (role === 'staff') return ['cases', 'documents', 'application'].includes(page) ? 'cases' : 'home';
+  /* 確認新申請屬於工作清單（原型 staffApply 在「工作清單」分頁下） */
+  if (role === 'staff') return page === 'cases' && view === 'confirm' ? 'home' : ['cases', 'documents', 'application'].includes(page) ? 'cases' : 'home';
   if (role === 'nurse'){
     if (page === 'cases' && view === 'assign') return 'assign';
     if (['assessment', 'care-summary', 'documents'].includes(page)) return 'residents';

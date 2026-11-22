@@ -3,4 +3,4 @@
 import { defineConfig } from 'vitest/config';
 
 /* tests/e2e 是 Playwright 的測試，不由 Vitest 執行 */
-export default defineConfig({ test: { include: ['tests/unit/**/*.test.js', 'tests/rls/**/*.test.js'], testTimeout: 20000, hookTimeout: 30000, fileParallelism: false } });
+export default defineConfig({ test: { include: ['tests/unit/**/*.test.js', 'tests/rls/**/*.test.js'], globalSetup: ['tests/vitest-cleanup.js'], testTimeout: 20000, hookTimeout: 30000, fileParallelism: false } });
