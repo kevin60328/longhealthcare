@@ -43,6 +43,8 @@ function parentTab(role, page, view, from){
   }
   if (role === 'nurse'){
     if (page === 'cases' && view === 'assign') return 'assign';
+    /* 與原型相同：文件核對、收治評估在「工作清單」下（原型返回工作清單）；住民資料、補充評估、看文件在「負責住民」下 */
+    if (page === 'assessment' && ['review', 'assess'].includes(view)) return 'home';
     if (['assessment', 'care-summary', 'documents'].includes(page)) return 'residents';
     return 'home';
   }

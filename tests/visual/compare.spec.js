@@ -71,6 +71,11 @@ const SCREENS = [
   { key: '54-補件追蹤', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('followup')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=followup&from=home'); } },
   { key: '55-看文件', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('doc', 'TEST-D_summary')"); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=doc&from=case&item=' + await docIdOf('T-D', 'summary')); } },
   { key: '56-要求補件', seed: true, proto: async p => { await protoLogin(p, 'staff@example.com'); await p.evaluate("go('case', 'TEST-B')"); await p.locator('[data-act="staff-request"]').click(); }, neu: async p => { await login(p, 'staff@example.com'); await p.goto('/documents.html?view=request&from=case&case=' + await caseIdOf('T-B')); } },
+  /* 階段 7：assessment.html */
+  { key: '60-負責住民', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('residents')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/assessment.html'); } },
+  { key: '61-住民資料', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('resident', 'TEST-A')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/assessment.html?case=' + await caseIdOf('T-A')); } },
+  { key: '62-醫療內容核對', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('review', 'TEST-A_summary')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/assessment.html?view=review&item=' + await docIdOf('T-A', 'summary')); } },
+  { key: '63-收治評估', seed: true, proto: async p => { await protoLogin(p, 'nurse@example.com'); await p.evaluate("go('assess', 'TEST-B')"); }, neu: async p => { await login(p, 'nurse@example.com'); await p.goto('/assessment.html?view=assess&case=' + await caseIdOf('T-B')); } },
   { key: '13-修改密碼', proto: async p => { await protoLogin(p, 'family@example.com'); await p.evaluate("go('password')"); },
     neu: async p => { await login(p, 'family@example.com'); await p.waitForURL(/dashboard/); await p.goto('/login.html?view=password'); } }
 ];

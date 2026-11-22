@@ -7,7 +7,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 export const SHARED = [
   ['js/modules/rules/core.js', 'supabase/functions/_shared/core.js'],
-  ['js/modules/services/model-build.js', 'supabase/functions/_shared/model-build.js']
+  ['js/modules/services/model-build.js', 'supabase/functions/_shared/model-build.js'],
+  ['js/modules/rules/fields.js', 'supabase/functions/_shared/fields.js']   // 護理核對欄位定義（OCR 護理核對模式用）
 ];
 export const HEAD = '/* 自動產生：由 npm run functions:sync 從原始檔複製，請勿直接修改（改原始檔後重新同步）。 */\n';
 

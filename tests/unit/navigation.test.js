@@ -29,6 +29,8 @@ describe('詳細頁歸到所屬分頁', () => {
     expect(navCurrent(me('staff'), 'documents', 'doc', 'home')).toBe('home');
   });
   it('護理評估頁歸負責住民', () => expect(navCurrent(me('nurse'), 'assessment', '')).toBe('residents'));
+  /* 階段 7 對照原型：文件核對、收治評估在「工作清單」下；補充評估在「負責住民」下 */
+  it('護理文件核對、收治評估歸工作清單；補充評估歸負責住民', () => { for (const v of ['review', 'assess']) expect(navCurrent(me('nurse'), 'assessment', v)).toBe('home'); expect(navCurrent(me('nurse'), 'assessment', 'supp')).toBe('residents'); });
   it('有分配權限的護理師在案件分配：只選案件分配', () => expect(navCurrent(me('nurse', { can_assign_nurse: true }), 'cases', 'assign')).toBe('assign'));
   it('沒有分配權限的護理師在案件分配：歸第一個分頁', () => expect(navCurrent(me('nurse'), 'cases', 'assign')).toBe('home'));
   it('管理員未知 view 歸帳號管理', () => expect(navCurrent(me('admin'), 'settings', 'x')).toBe('accounts'));

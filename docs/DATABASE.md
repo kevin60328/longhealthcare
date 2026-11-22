@@ -51,6 +51,7 @@
 | `review_drafts` | 護理核對草稿 | → `document_versions` |
 | `ocr_runs` | AI 辨識結果 | → `document_versions` |
 | `medical_facts` | 護理逐欄確認的醫療資料，一欄一列 | → `document_versions`、`profiles` |
+| `assessment_items` | 收治評估「需補充」時指定的文件（階段 7） | → `assessments`、`documents` |
 
 ### 護理、習慣卡、摘要卡
 | 資料表 | 內容 | 關聯 |
@@ -84,6 +85,7 @@
 | `documents.cond_met` | 文件「目前」是否需要，是案件狀態本身；變更過程另記在 `document_need_changes`。 |
 | `mail_jobs.status`、`claim_*` | Email 工作目前的狀態與認領資訊（狀態機），不是由寄送紀錄推得。 |
 | `audit_logs.actor_name` | 操作當時的姓名快照，帳號改名或刪除後紀錄不變；因此 `actor` 不設外鍵。 |
+| `document_versions.review`、`labs`、`dx_rows`（階段 7） | 護理核對完成**當時**的逐欄紀錄（原始值、AI 第幾次、修改歷程）、檢驗數值、病摘逐筆診斷：核對完成後不再修改的快照。確認後的醫療資料本身仍一欄一列存在 `medical_facts`，診斷逐筆存在 `diagnoses`。 |
 | jsonb 欄位：習慣卡內容、習慣卡審核快照、摘要卡內容與依據、身分核對明細、核對草稿、AI 原始結果 | 內容是「當時的整份表單或快照」，不含指向其他資料的 id，也不會被拆開查詢。 |
 
 ## 4. 資料庫本身會擋下的錯誤
@@ -118,6 +120,12 @@
 | 6 | `staff_receipt`、`mark_id_pending`、`confirm_doc_date` | 收件核對、身分待確認、確認日期；狀態改變後自動處理補件（確認過期建立系統補件、確認符合關閉補件） |
 | 6 | `request_documents`、`remind_document`、`add_case_document`、`close_request_fix` | 要求補件（全部檢查通過才寫入）、一般提醒、新增個案文件、補寫補件關閉紀錄 |
 | 6 | `open_document_file` | 取得檔案位置；行政打開醫療類文件記錄一次 |
+| 7 | `set_nurse_need` | 管路、傷口、吞嚥是否需要（只限承辦護理師）；判斷需要時自動建立補件，改判不需要時關閉未完成的補件，並回覆行政的重新判斷請求 |
+| 7 | `save_review_draft`、`complete_review`、`return_document` | 逐欄核對草稿（文件＋版本）、完成核對（寫入醫療資料、核對紀錄，同一交易同步逐筆診斷）、退回補件 |
+| 7 | `save_supp` | 護理補充評估（醫院沒有提供獨立紀錄時；記錄來源，不當成醫院文件） |
+| 7 | `dx_import`、`dx_save`、`dx_resync` | 診斷清單（ICD-10-CM 只檢查格式；修改要帶畫面看到的原文，防止同時修改） |
+| 7 | `review_habit` | 習慣卡初審（以資料庫的正式提交為快照；版本不符擋下） |
+| 7 | `save_assessment` | 收治評估／入住前確認；每次送出前重新檢查承辦、利益衝突、文件齊全（`docs_ready`）、習慣卡初審（`habit_gate`）、簽約、目前沒有有效評估 |
 | 6（後端） | `ensure_req_mail`、`claim_mail_job`、`release_mail_job`、`finish_mail_job`、`req_event`、`ocr_start`、`ocr_finish` | 只給 Edge Function（send-mail、ocr）以 service role 呼叫 |
 | 測試 | `purge_test_data` | 只有後端金鑰能執行；只刪自動測試帳號（e2e-／rls-…@example.com）的案件與紀錄（回傳案件 id，檔案由腳本刪除） |
 
@@ -131,8 +139,9 @@
 
 ## 7. 與業務規則同一套判斷的資料庫函式（階段 6）
 
-`doc_status()`（文件狀態）、`doc_done()`、`req_event()`（補件事件是否開啟）是 `js/modules/rules/core.js` 的 `status`、`isDone`、`mailReqEvent` 的資料庫版本，給 RPC 檢查狀態、給 send-mail 判斷要不要寄。
-規則改了兩邊都要改；`tests/rls/documents.test.js` 會把所有進行中案件的每一份文件、每一筆補件拿兩邊逐筆比對，不一致就失敗。
+`doc_status()`（文件狀態）、`doc_done()`、`req_event()`（補件事件是否開啟）、`docs_ready()`（文件齊全，階段 7）是 `js/modules/rules/core.js` 的 `status`、`isDone`、`mailReqEvent`、`docsReady` 的資料庫版本，給 RPC 檢查狀態、給 send-mail 判斷要不要寄。
+規則改了兩邊都要改；`tests/rls/documents.test.js`、`assessment.test.js` 會把所有進行中案件的每一份文件、每一筆補件、每一個案件拿兩邊逐筆比對，不一致就失敗。
+`habit_gate()` 只檢查「最新一次正式提交已審核完成」；「審核完成後已確認醫療資料改變」由畫面依規則判斷（見 PROGRESS 還沒做）。
 
 ## 8. 檔案（Storage）
 

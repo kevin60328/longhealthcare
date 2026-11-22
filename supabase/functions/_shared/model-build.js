@@ -76,7 +76,9 @@ export function buildCase(m, accounts){
   /* 收治評估：最新一筆有效；被「重新評估／延期」取代（outcome 有值）時目前沒有評估 */
   const as = (m.assessments || []).map(a => ({ result: a.result, mode: a.mode, move: a.move || '', behav: a.behav || '', iso: a.iso || '', reason: a.reason || '',
     coord: a.coord_at ? { note: a.coord_note || '', by: a.coord_by, at: toStamp(a.coord_at), from: a.coord_from || undefined } : undefined,
-    outcome: a.outcome || undefined, by: a.by, at: toStamp(a.at), ts: toTs(a.at) }));
+    outcome: a.outcome || undefined, by: a.by, at: toStamp(a.at), ts: toTs(a.at),
+    /* DNR／預立醫療決定（評估時另行確認）、需補充時指定的文件（原型 assessment.dnr、items） */
+    dnr: a.dnr_state ? { state: a.dnr_state, src: a.dnr_src || '' } : undefined, items: (a.items || []).map(id => keyOf[id]).filter(Boolean) }));
   const lastA = as[as.length - 1];
   c.assessment = lastA && !lastA.outcome ? lastA : null;
   c.assessHistory = c.assessment ? as.slice(0, -1) : as;
@@ -105,7 +107,10 @@ export function buildCase(m, accounts){
   c.cardDraft = open ? (cards.filter(x => x.status === '草稿' && x.v > open.v).slice(-1)[0] || null) : null;
   c.cardHistory = cards.filter(x => x.status === '已取代');
 
-  c.diagnoses = (m.diagnoses || []).map(d => ({ state: d.status, raw: d.text, std: '', src: d.source_document ? { itemId: keyOf[d.source_document], v: d.source_version } : null }));
+  /* 診斷清單（原型 c.diagnoses）：raw＝原始文字、std＝標準化名稱、src＝來源文件版本與病摘第幾筆、superseded＝已由新版取代 */
+  c.diagnoses = (m.diagnoses || []).map(d => ({ id: d.id, state: d.status, raw: d.text, std: d.std || '', icd: d.icd_code || '', icdName: d.icd_name || '', reason: d.reason || '',
+    src: d.source_document ? { itemId: keyOf[d.source_document], v: d.source_version, row: d.source_row == null ? undefined : d.source_row, name: nameOf[d.source_document] || '' } : null,
+    superseded: !!d.superseded_at, by: d.confirmed_by || null, at: toStamp(d.confirmed_at) || null }));
 
   /* 文件 */
   const items = {};
@@ -144,6 +149,8 @@ export function buildCase(m, accounts){
         adminOk: v.admin_ok === true, nurseOk: v.nurse_ok === true, nurseBy: v.nurse_by || undefined, nurseAt: toStamp(v.nurse_at), nurseTs: toTs(v.nurse_at),
         /* 護理逐欄確認的內容存在 medical_facts（每欄一列），這裡組回原型的 fields 物件 */
         fields: v.facts || undefined,
+        /* 護理核對完成當時的紀錄（逐欄來源與歷程、整份來源、檢驗數值、病摘逐筆診斷） */
+        review: v.review || undefined, reviewSrc: v.review_src || undefined, labs: v.labs || undefined, dxRows: v.dx_rows || undefined,
         supp: v.supp_src != null ? { src: v.supp_src, note: v.supp_note || '', by: v.uploaded_by, at: toStamp(v.uploaded_at) } : undefined,
         fromItem: v.from_document_id ? { id: keyOf[v.from_document_id], v: v.from_version, name: nameOf[v.from_document_id] || '' } : undefined,
         /* 檔案：path 是 Storage 的位置（只有看得到內容的角色才會拿到）；畫面要看檔案時用 open_document_file 取得短時效網址 */
