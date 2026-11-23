@@ -100,8 +100,13 @@ async function orgPage({ main }){
     <div class="card stack"><h2>合作醫院與轉介單位</h2>
       <label class="f">每行一家<span class="hint">家屬填寫申請時可以直接選擇</span><textarea name="partners" rows="4">${esc(h.data.map(x => x.name).join('\n'))}</textarea></label></div>
     <div class="card stack"><h2>入住流程順序</h2>
-      <label class="choice"><input type="radio" name="mode" value="先審後簽" ${org.flow_mode === '先審後簽' ? 'checked' : ''}><span><strong>先審後簽</strong>：先看文件評估，通過後再參訪簽約</span></label>
-      <label class="choice"><input type="radio" name="mode" value="先簽後審" ${org.flow_mode === '先簽後審' ? 'checked' : ''}><span><strong>先簽後審</strong>：先參訪簽約，入住前再交醫療資料確認</span></label>
+      <label class="choice"><input type="radio" name="mode" value="先審後簽" ${org.flow_mode === '先審後簽' ? 'checked' : ''}><span><strong>先審後簽（建議）</strong>：先看文件評估，通過後再參訪簽約</span></label>
+      <!-- 客戶回饋（2026/11/23，使用者決定）：多數機構是先審後簽，先簽後審保留（HANDOFF 3.1 不能刪）但收在「其他流程」並加說明；
+           目前設定是先簽後審時自動展開，管理員一定看得到目前的選擇 -->
+      <details id="flowOther" ${org.flow_mode === '先簽後審' ? 'open' : ''}><summary class="small">其他流程（少數機構使用）</summary>
+        <label class="choice"><input type="radio" name="mode" value="先簽後審" ${org.flow_mode === '先簽後審' ? 'checked' : ''}><span><strong>先簽後審</strong>：先參訪簽約，入住前再交醫療資料確認</span></label>
+        <p class="small muted" style="margin:0">護理確認在簽約之後；入住前確認結果不適合時，要再和家屬協調或結案。</p>
+      </details>
       <p class="small muted" style="margin:0">變更只影響之後新建的申請；已建立的案件維持建立時的流程。</p></div>
     <div class="err" id="setErr" role="alert"></div>
     <div class="row end"><button type="submit" class="btn primary">儲存設定</button></div>
