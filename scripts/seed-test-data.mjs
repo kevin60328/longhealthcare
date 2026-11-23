@@ -90,4 +90,7 @@ for (const [k, c] of Object.entries(seed)){
   must(await db.from('audit_logs').insert(logs), `建立 ${c.no} 紀錄`);
   console.log(`案件 ${c.no}（${c.patient.name}，${c.flowMode}）：${docs.length} 份文件`);
 }
+/* 這是測試專案：開啟「測試資料」功能（settings.html?view=testdata）。正式專案不執行這個腳本，維持 migration 寫入的「否」（HANDOFF 10.10） */
+must(await db.from('system_env').update({ is_test: true }).eq('id', 1), '標示測試環境');
+console.log('已標示為測試環境（測試資料功能可用）');
 console.log('完成');

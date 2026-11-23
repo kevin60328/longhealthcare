@@ -19,6 +19,7 @@
 |---|---|---|
 | `profiles` | 帳號、角色、狀態、手機 | → `auth.users`（Supabase 登入帳號） |
 | `org_settings` | 機構設定（只有一列） | |
+| `system_env` | 這個資料庫是不是測試環境（只有一列；migration 寫「否」，`npm run db:seed` 對測試專案改成「是」；測試資料功能只在「是」時可用，階段 9） | |
 | `partner_hospitals` | 合作醫院，一院一列 | |
 | `doc_catalog` | 內建文件清單（24 項）＋只在需要時加入的代理權證明（`on_demand`：監護／輔助宣告裁定書、代理權授權證明） | |
 | `doc_catalog_parts` | 文件的核對項目（例如體檢的 CBC、肝功能） | → `doc_catalog` |
@@ -99,7 +100,7 @@
 - 摘要卡開放給照服員以外的人
 - 不在文件清單的文件 key 不是 `custom_`／`extra_`；清單內的文件另存準備說明（000025 修正：空值比較原本會被當成通過）
 - Email 工作同時指向案件與補件，或兩者都沒有
-- 修改或刪除操作紀錄（連 service role 也不行；唯一例外是 `purge_test_data` 執行期間、而且只限自動測試帳號的紀錄）
+- 修改或刪除操作紀錄（連 service role 也不行；例外只有 `purge_test_data` 執行期間、只限自動測試帳號的紀錄，以及 `reset_test_cases` 執行期間、只限測試環境的 T-A～T-D）
 - **跨案件的矛盾資料**（000010）：代理權證明、診斷來源文件、沿用的文件檔案，都必須屬於同一個案件（前兩者用「文件＋案件」複合外鍵，第三個用觸發器）
 
 ## 5. 寫入方式（RPC，一個交易內完成）
@@ -131,6 +132,12 @@
 | 8（後端） | `my_care_card` | 照服員讀自己的卡（Edge Function care-card 以 service role 呼叫，另依規則算出依據變更的欄位） |
 | 7 | `save_assessment` | 收治評估／入住前確認；每次送出前重新檢查承辦、利益衝突、文件齊全（`docs_ready`）、習慣卡初審（`habit_gate`）、簽約、目前沒有有效評估 |
 | 6（後端） | `ensure_req_mail`、`claim_mail_job`、`release_mail_job`、`finish_mail_job`、`req_event`、`ocr_start`、`ocr_finish` | 只給 Edge Function（send-mail、ocr）以 service role 呼叫 |
+| 9 | `approve_account`、`reject_account`、`set_account_status`、`set_account_role`、`set_assign_permission` | 帳號審核、停用／啟用、變更角色（回傳要改派的案件數；離開護理角色時取消案件分配權限）、案件分配權限（只限護理人員）；只限啟用中的管理員，不能修改自己 |
+| 9 | `update_org_settings` | 機構設定與合作醫院清單（帶畫面看到的版本號，防止兩位管理員同時修改；天數範圍檢查） |
+| 9 | `admin_archive_list`、`add_retention_hold`、`admin_mail_issues` | 結案清單（含延長保存）、延長保存、寄送異常（寄送失敗、寄送中逾時、待寄送超過 10 分鐘、補件沒有通知工作） |
+| 9（後端） | `mark_password_reset` | Edge Function admin-users 用 Auth Admin API 設定臨時密碼後，標示「首次登入要改密碼」並記操作紀錄 |
+| 9（後端） | `archive_targets`、`archive_case_as` | Edge Function admin-archive：先列出要刪的檔案（延長保存中、未結案、已封存都擋下）→ Storage 刪除 → 版本標示已刪除、刪除核對草稿與 AI 結果、案件標示封存；檔案刪除失敗時狀態記「處理未完成」 |
+| 9（後端） | `reset_test_cases` | Edge Function admin-testdata 與 `npm run db:seed-cases`：只在測試環境（`is_test_env()`）、只限 T-A～T-D，刪除後由腳本重建 |
 | 測試 | `purge_test_data` | 只有後端金鑰能執行；只刪自動測試帳號（e2e-／rls-…@example.com）的案件與紀錄（回傳案件 id，檔案由腳本刪除） |
 
 每個 RPC 都會先檢查身分與案件狀態，失敗就整筆不寫入。
@@ -152,6 +159,7 @@
 私有 bucket `case-files`，路徑 `<案件 id>/<文件 key>/v<版本>-<隨機 id>.<副檔名>`。讀取與上傳的 policy 用 `can_read_file`、`can_upload_file`，判斷方式與資料表相同；不開放修改與刪除。
 行政讀取醫療類（B、C、D 類）檔案前必須先經過 `open_document_file`（寫 `document_views` 與操作紀錄），否則 Storage 拒絕。
 測試資料清除時由 `scripts/clean-test-data.mjs` 用 Storage API 刪除測試案件的檔案。
+封存（階段 9）由 Edge Function `admin-archive` 以 Storage API 刪除案件的原始檔案（每批 100 個），資料庫只保留版本紀錄並標示 `file_removed`；恢復測試案件 T-A～T-D 時，`admin-testdata` 與 `seed-test-cases.mjs` 會刪除舊案件上傳過的檔案。
 
 ## 9. 讀取方式
 
