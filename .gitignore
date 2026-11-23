@@ -9,3 +9,4 @@ supabase/.branches/
 test-results/
 playwright-report/
 visual-compare/
+/demo-shots/
