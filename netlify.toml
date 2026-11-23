@@ -1,0 +1,36 @@
+# Netlify 部署設定（階段 10；使用者 2026/11/23 選定 Netlify，HANDOFF 15-8）
+#
+# 用法：Netlify 後台「Add new site → Import from GitHub」選這個 repo，建置設定會自動讀這個檔案。
+# 前端需要的 4 個公開設定值（.env 沒有進 git）要在 Netlify 後台 Site configuration → Environment variables 填：
+#   VITE_SUPABASE_URL、VITE_SUPABASE_ANON_KEY（公開值，可以放在前端）、VITE_APP_ENV（test）、VITE_ENV_NOTE（頁尾文字）
+# 不要在 Netlify 填任何秘密（service role、資料庫密碼、Claude API key）：秘密只放在 Supabase Edge Functions。
+# 部署後要把網站網址加到 Supabase 後台 Authentication → URL Configuration（Site URL 與 Redirect URLs），
+# 否則註冊確認信與忘記密碼信的連結會被擋。
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # 建置時不需要下載 Playwright 瀏覽器（只有本機測試用）
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+
+# 網站根目錄由 index.html 轉到 login.html（不另外設轉址規則）
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # 不允許被別的網站用 iframe 嵌入（防止點擊劫持）
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    # 網址帶有案件 id，連到外部網站時不要把完整網址送出去
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # 測試環境：不讓搜尋引擎收錄（正式上線時再決定是否拿掉）
+    X-Robots-Tag = "noindex, nofollow"
+
+# 打包後的 JS／CSS 檔名含雜湊，可以長期快取；HTML 不快取，部署新版後馬上生效
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
