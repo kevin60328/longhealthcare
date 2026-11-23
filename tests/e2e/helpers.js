@@ -16,7 +16,13 @@ export const service = () => createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE
 export async function login(page, email, { portal, password = PASSWORD, next } = {}){
   const q = new URLSearchParams({ view: 'login', portal: portal || (/^(family|e2e-)/.test(email) ? 'applicant' : 'staff') });
   if (next) q.set('next', next);
-  await page.goto('/login.html?' + q);
+  /* 測試常常按「登出」後馬上呼叫 login()：網站的登出要等 Supabase 回應後才轉到入口頁（js/auth.js logout），
+   * 這個轉址可能打斷這裡的 goto（ERR_ABORTED），或在 goto 之後蓋掉登入頁（停在入口選擇）。
+   * 本機很少遇到，連線上網站（Netlify，階段 10）時常出現，所以被打斷就重新開登入頁，最多 3 次。 */
+  for (let i = 0; ; i++){
+    try { await page.goto('/login.html?' + q); await page.getByLabel('電子郵件').waitFor({ timeout: 5000 }); break; }
+    catch (e){ if (i >= 2) throw e; }
+  }
   await page.getByLabel('電子郵件').fill(email);
   await page.getByRole('textbox', { name: '密碼', exact: true }).fill(password);
   await page.getByRole('button', { name: '登入' }).click();

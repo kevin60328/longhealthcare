@@ -23,16 +23,29 @@ export function loadModel(meProfile, opts = {}){
 }
 export const invalidateModel = () => cache.clear();
 
+/* 暫時性錯誤：資料庫查詢逾時（57014 statement timeout）、網路中斷、伺服器 5xx。
+ * 階段 10 實測：雲端免費方案在同時有多人操作時，平常 0.1～0.3 秒的查詢偶爾會拖到 8 秒上限被中止，再讀一次通常就正常。
+ * 這裡只用在「讀取」（不改資料），重試不會造成重複寫入。權限錯誤等其他錯誤不重試，直接顯示。 */
+export function isTransient(e){
+  if (!e) return false;
+  const msg = String(e.message || e);
+  return e.code === '57014' || /statement timeout|Failed to fetch|NetworkError|Load failed|fetch failed/i.test(msg) || (e.status >= 500 && e.status < 600);
+}
+
 async function fetchModel(meProfile, { caseId = null, includeClosed = false } = {}){
   const db = supabase();
-  const [models, profiles, org, catalog, staff] = await Promise.all([
+  const read = () => Promise.all([
     db.rpc('get_case_models', { p_case: caseId, p_include_closed: includeClosed }),
     db.from('profiles').select('id, email, name, role, want, status, phone, can_assign_nurse'),
     db.from('org_settings').select('*').eq('id', 1).maybeSingle(),
     db.from('doc_catalog').select('key, why, "where", on_demand').order('sort'),
     db.rpc('staff_directory')
   ]);
-  for (const r of [models, profiles, org, catalog, staff]) if (r.error) throw r.error;
+  let rs = await read();
+  /* 遇到暫時性錯誤：等 1 秒自動再讀一次（只一次），還是失敗才顯示「無法載入資料」 */
+  if (rs.some(r => isTransient(r.error))){ await new Promise(ok => setTimeout(ok, 1000)); rs = await read(); }
+  const [models, profiles, org, catalog, staff] = rs;
+  for (const r of rs) if (r.error) throw r.error;
   const { D, me } = assembleModel({ models: models.data, profiles: profiles.data, org: org.data, catalog: catalog.data, staff: staff.data }, meProfile);
   return { D, me, R: createRules(D, { me, today: todayTW() }) };
 }
