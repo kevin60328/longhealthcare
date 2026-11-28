@@ -113,7 +113,9 @@ describe('結案與封存', () => {
     expect(r).toMatchObject({ ok: true, status: '保存處理完成', removed: 1, failed: 0 });
     expect((await service().storage.from('case-files').download(v.storage_path)).error).not.toBeNull();
     expect((await service().from('document_versions').select('file_removed, documents!inner(case_id)').eq('documents.case_id', C2).single()).data.file_removed).toBe(true);
-    expect((await service().from('cases').select('archive_status, archived_by').eq('id', C2).single()).data).toEqual({ archive_status: '保存處理完成', archived_by: ID.admin });
+    expect((await service().from('cases').select('archive_status').eq('id', C2).single()).data).toEqual({ archive_status: '保存處理完成' });
+    /* 封存者記在操作紀錄（cases.archived_by 已移除，見 migrations/…000035） */
+    expect((await service().from('audit_logs').select('actor, action').eq('case_id', C2).like('action', '封存案件%').single()).data.actor).toBe(ID.admin);
     expect((await fn(admin, 'admin-archive', { case_id: C2 })).reason).toMatch(/已封存/);
   });
 });
@@ -139,5 +141,19 @@ describe('寄送異常、測試資料、環境', () => {
     expect((await admin.rpc('reset_test_cases', { p_nos: ['T-A'] })).error).not.toBeNull();
     expect((await service().from('audit_logs').delete().eq('action', '確認申請並轉交護理部門（待護理分配）')).error?.message).toMatch(/只能新增/);
     expect((await admin.from('system_env').select('is_test').single()).data.is_test).toBe(true);
+  });
+});
+
+describe('資料庫清理（000035）', () => {
+  it('沒有用到的欄位已移除', async () => {
+    for (const [t, c] of [['assessments', 'notified_at'], ['audit_logs', 'detail'], ['documents', 'deleted_at'], ['profiles', 'phone_updated_at'], ['profiles', 'password_changed_at'], ['cases', 'archived_by'], ['diagnoses', 'synced_at']])
+      expect((await service().from(t).select(c).limit(1)).error?.message, `${t}.${c}`).toMatch(/does not exist/);
+    expect((await service().from('profiles').select('last_login_at').limit(1)).error).toBeNull();   // 保留，在帳號管理顯示
+  });
+  it('診斷的來源文件與版本必須同時有或同時沒有；退回紀錄必須有版本', async () => {
+    const C = (await service().from('cases').select('id').eq('no', 'T-A').single()).data.id;
+    const D = (await service().from('documents').select('id').eq('case_id', C).eq('key', 'summary').single()).data.id;
+    expect((await service().from('diagnoses').insert({ case_id: C, text: '測試', status: '待確認', source_document: D }).select()).error?.message).toMatch(/diagnoses_source/);
+    expect((await service().from('document_returns').insert({ document_id: D, reason: '測試' }).select()).error?.message).toMatch(/version_v/);
   });
 });

@@ -32,16 +32,17 @@ bootPage('settings', async ctx => {
   return accountsPage(ctx);
 });
 
-/* ========== 帳號管理（原型 adminAccounts） ========== */
+/* ========== 帳號管理（原型 adminAccounts） ==========
+ * 「最後登入」：原型記在帳號（lastLogin），正式版 profiles.last_login_at（record_login 寫入）。管理員可據此找出很久沒使用、應停用的帳號（2026/11/28 資料庫清理時決定顯示） */
 async function accountsPage({ main, me }){
-  const { data, error } = await supabase().from('profiles').select('id, email, name, role, want, status, phone, can_assign_nurse, created_at');
+  const { data, error } = await supabase().from('profiles').select('id, email, name, role, want, status, phone, can_assign_nurse, created_at, last_login_at');
   if (error) throw error;
   const list = data.sort((a, b) => (a.status === '待審核' ? 0 : 1) - (b.status === '待審核' ? 0 : 1) || String(b.created_at).localeCompare(String(a.created_at)));
   const pending = list.filter(a => a.status === '待審核');
   main.innerHTML = `<h1>帳號管理</h1>${purpose('核准機構人員的角色申請、變更職務角色、停用帳號，或為忘記密碼的使用者重設臨時密碼。家屬帳號註冊後即可使用，由行政確認其與住民的關係。')}
   ${pending.length ? `<div class="card" style="margin-bottom:14px" id="pendingCard"><h2>待審核（${pending.length}）</h2><ul class="tasks">${pending.map(a => `<li class="task">${pill('待審核', 'warn')}<div><div class="what">${esc(a.name)}　申請「${esc(ROLE_NAME[a.want] || a.want)}」</div><div class="small muted">${esc(a.email)}　${esc(a.phone || '')}　${esc(toStamp(a.created_at) || '')}</div></div><span class="row"><button type="button" class="btn sm primary" data-approve="${a.id}">核准</button><button type="button" class="btn sm" data-reject="${a.id}">退回</button></span></li>`).join('')}</ul></div>` : ''}
-  <div class="card tbl-wrap"><table><thead><tr><th>姓名</th><th>電子郵件</th><th>角色</th><th>狀態</th><th></th></tr></thead><tbody id="accRows">
-  ${list.filter(a => a.status !== '待審核').map(a => `<tr data-acc="${esc(a.email)}"><td>${esc(a.name)}</td><td class="small">${esc(a.email)}</td><td>${esc(ROLE_NAME[a.role] || ROLE_NAME[a.want] || '')}${a.can_assign_nurse && a.role === 'nurse' ? '<br>' + pill('案件分配權限', 'info') : ''}</td><td>${pill(a.status, a.status === '啟用' ? 'ok' : 'mute')}</td><td><span class="row">${a.id !== me.id ? `${a.status === '啟用' ? `<button type="button" class="btn sm" data-disable="${a.id}">停用</button>` : a.status === '停用' ? `<button type="button" class="btn sm" data-enable="${a.id}">啟用</button>` : ''}${a.role && a.role !== 'family' && a.status === '啟用' ? `<button type="button" class="btn sm" data-role="${a.id}">變更角色</button>` : ''}${a.role === 'nurse' && a.status === '啟用' ? `<button type="button" class="btn sm" data-assign="${a.id}">${a.can_assign_nurse ? '取消案件分配權限' : '開啟案件分配權限'}</button>` : ''}<button type="button" class="btn sm" data-reset="${a.id}">重設密碼</button>` : '<span class="small muted">（您）</span>'}</span></td></tr>`).join('')}
+  <div class="card tbl-wrap"><table><thead><tr><th>姓名</th><th>電子郵件</th><th>角色</th><th>狀態</th><th>最後登入</th><th></th></tr></thead><tbody id="accRows">
+  ${list.filter(a => a.status !== '待審核').map(a => `<tr data-acc="${esc(a.email)}"><td>${esc(a.name)}</td><td class="small">${esc(a.email)}</td><td>${esc(ROLE_NAME[a.role] || ROLE_NAME[a.want] || '')}${a.can_assign_nurse && a.role === 'nurse' ? '<br>' + pill('案件分配權限', 'info') : ''}</td><td>${pill(a.status, a.status === '啟用' ? 'ok' : 'mute')}</td><td class="small">${a.last_login_at ? esc(toStamp(a.last_login_at)) : '<span class="muted">尚未登入</span>'}</td><td><span class="row">${a.id !== me.id ? `${a.status === '啟用' ? `<button type="button" class="btn sm" data-disable="${a.id}">停用</button>` : a.status === '停用' ? `<button type="button" class="btn sm" data-enable="${a.id}">啟用</button>` : ''}${a.role && a.role !== 'family' && a.status === '啟用' ? `<button type="button" class="btn sm" data-role="${a.id}">變更角色</button>` : ''}${a.role === 'nurse' && a.status === '啟用' ? `<button type="button" class="btn sm" data-assign="${a.id}">${a.can_assign_nurse ? '取消案件分配權限' : '開啟案件分配權限'}</button>` : ''}<button type="button" class="btn sm" data-reset="${a.id}">重設密碼</button>` : '<span class="small muted">（您）</span>'}</span></td></tr>`).join('')}
   </tbody></table></div>`;
   const acc = id => list.find(a => a.id === id);
   const rpcModal = (title, body, ok, fn, opts = {}) => modal({ title, body, ok, ...opts, onOk: async host => { const e = await fn(host); if (e) return e; return ''; } });

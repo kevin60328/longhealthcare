@@ -12,6 +12,15 @@ export async function openConflicts(){
   return data;
 }
 
+/* 已處理的紀錄（行政「已完成」分頁顯示）：誰、何時、怎麼處理（resolved_by、resolution；2026/11/28 資料庫清理時決定顯示） */
+export async function resolvedConflicts(){
+  const { data, error } = await supabase().from('resident_conflicts')
+    .select('id, submitted_name, created_at, resolved_at, resolution, family:profiles!resident_conflicts_family_id_fkey(name), resolver:profiles!resident_conflicts_resolved_by_fkey(name)')
+    .not('resolved_at', 'is', null).order('resolved_at', { ascending: false }).limit(50);
+  if (error) throw error;
+  return data;
+}
+
 export async function countOpenConflicts(){
   const { count, error } = await supabase().from('resident_conflicts').select('id', { count: 'exact', head: true }).is('resolved_at', null);
   if (error){ console.warn('住民資料待確認數量讀取失敗', error); return 0; }

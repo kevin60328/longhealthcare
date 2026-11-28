@@ -205,9 +205,11 @@ test('臨時密碼：強制改密碼，改完清除旗標並進首頁', async ({
   await page.getByRole('button', { name: '儲存新密碼' }).click();
   await expect(page).toHaveURL(/dashboard\.html$/);
   await expect(page.locator('.toast')).toHaveText('密碼已更新');
-  const { data } = await service().from('profiles').select('must_change_password, password_changed_at').eq('id', u.id).single();
+  const { data } = await service().from('profiles').select('must_change_password').eq('id', u.id).single();
   expect(data.must_change_password).toBe(false);
-  expect(data.password_changed_at).not.toBeNull();
+  /* 改密碼的時間記在操作紀錄（profiles.password_changed_at 已移除，見 migrations/…000035） */
+  const { data: lg } = await service().from('audit_logs').select('action').eq('actor', u.id).order('id', { ascending: false }).limit(1).single();
+  expect(lg.action).toMatch(/密碼/);
 });
 
 test('修改密碼：目前的密碼錯誤會擋下；正確才更新，新密碼可登入', async ({ page }) => {

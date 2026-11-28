@@ -144,7 +144,7 @@
 
 ## 6. 實際檢查結果（2026/11/21，直接查詢雲端測試專案）
 
-- 35 張資料表、81 個外鍵；陣列欄位 0 個。（階段 6 之後：多了 `document_views`；`mail_jobs.claim_by` 改成帳號外鍵；`document_requests` 加 `superseded_by`、`closed_by` 外鍵；`mail_attempts.by` 外鍵）
+- 35 張資料表、81 個外鍵；陣列欄位 0 個。**2026/11/28 清理後：41 張資料表、96 個外鍵**（見第 10 節）。（階段 6 之後：多了 `document_views`；`mail_jobs.claim_by` 改成帳號外鍵；`document_requests` 加 `superseded_by`、`closed_by` 外鍵；`mail_attempts.by` 外鍵）
 - 編號類欄位沒有外鍵的只有：`audit_logs.actor`（刻意，見第 3 節）、`care_cards.v`、`document_versions.v`（版本號本身）、`org_settings.rev`（設定修改次數）。
 - jsonb 欄位 11 個，全部是第 3 節列出的快照或表單內容。
 
@@ -164,3 +164,26 @@
 ## 9. 讀取方式
 
 前端只能讀，資料列由 RLS 依角色過濾（`000002_rls.sql`、`000007` 的新表）。案件與文件的完整判斷資料由 `get_case_models()` 一次回傳（`000008`），函式內檢查權限，並對沒有權限看內容的文件只回傳狀態欄位。寫入一律走各階段的 RPC（一個交易內檢查權限、狀態並記錄操作紀錄）。
+
+## 10. 資料庫清理（2026/11/28，migration 000035）
+
+使用者與同事提出：資料表裡每個欄位、每條關聯都要說得出用途。做法是逐欄比對網頁程式、Edge Functions、資料庫函式與權限規則（只讀檢查 403 個欄位、100 個外鍵），再依結果處理：
+
+| 項目 | 處理 | 理由 |
+|---|---|---|
+| `assessments.notified_at` | 刪除 | 從未寫入。送出評估時在同一交易寫通知，通知時間就是通知的建立時間 |
+| `audit_logs.detail` | 刪除 | 從未寫入，操作內容一律寫在 `action` |
+| `documents.deleted_at` | 刪除 | 系統沒有刪除文件的功能（文件與歷程都要保留，不需要的文件用「本案不需要」處理）；16 個函式的「未刪除」條件一併移除 |
+| `profiles.phone_updated_at`、`password_changed_at` | 刪除 | 只寫不讀；改電話、改密碼的時間已記在操作紀錄 |
+| `cases.archived_by` | 刪除 | 只寫不讀；封存者已記在操作紀錄 |
+| `diagnoses.synced_at` | 刪除 | 只寫不讀，沒有業務用途 |
+| `ocr_runs`、`review_drafts` 單獨指向文件的外鍵 | 刪除 | 版本必填，「文件＋版本」外鍵已保證文件存在 |
+| `document_returns` 單獨指向文件的外鍵 | 版本改為必填後刪除 | 退回一定針對某個版本 |
+| `diagnoses` 單獨指向文件的外鍵 | 刪除（原本已有規定 `diagnoses_source`：來源文件與版本同時有或同時沒有；000035 誤加的重複規定由 000036 移除） | 人工新增的診斷兩者皆無；有來源時由「文件＋版本」「文件＋案件」外鍵保證 |
+| `profiles.last_login_at` | 保留，**帳號管理顯示「最後登入」** | 管理員據此找出很久沒使用、應停用的帳號（存取控管） |
+| `diagnoses.added_by`、`diagnosis_changes` | 保留，**診斷清單顯示「診斷修改歷程」** | 醫療資料的新增與修改要能追溯 |
+| `resident_conflicts.resolved_by`、`resolution` | 保留，**行政「已完成」顯示已處理的住民資料不一致** | 處理結果的紀錄 |
+
+看起來重複但保留的外鍵：`consents`、`diagnoses` 的「→ 案件」（另一條複合外鍵的欄位可能是空的）、`habit_reviews` 的「→ 案件」（刪除案件時靠它連帶刪除審核紀錄）。
+沒有外鍵但不是遺漏：`audit_logs.actor`（第 3 節）、`mail_jobs.send_key`／`mail_attempts.send_key`（防重複寄送的識別碼，不是關聯）。
+

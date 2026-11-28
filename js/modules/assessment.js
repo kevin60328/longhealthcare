@@ -15,7 +15,7 @@
  * 補件（退回、需求判斷需要、評估需補充）建立後，呼叫 send-mail 補寄 Email 通知（模擬）。 */
 import { bootPage } from '../page.js';
 import { supabase } from '../api/supabase.js';
-import { loadModel, invalidateModel } from './services/model.js';
+import { loadModel, invalidateModel, toStamp } from './services/model.js';
 import { openFile, OCR_TYPES } from './services/files.js';
 import { syncReqMails } from './mail-ui.js';
 import { esc, pill, toast, modal, purpose, errText, setFlash } from '../ui.js';
@@ -120,7 +120,8 @@ function dxCard(R, c){
   const L = c.diagnoses || [], can = c.nurseId === ME.id && R.canProcess(c), src = confirmedSrc(R, c, 'dx'), pend = R.dxPending(c);
   return `<div class="card stack" id="sec-dx"><h2>診斷清單（ICD-10-CM）</h2>${pend ? `<div class="notice bad" id="dxSyncBox"><strong>診斷同步未完成</strong>：${esc(pend.it.name)} 第 ${pend.v.v} 版已逐筆確認 ${pend.v.dxRows.rows.filter(r => r.state === '已確認').length} 筆，診斷清單還缺 ${pend.missing.length} 筆${pend.stale.length ? `、舊版 ${pend.stale.length} 筆尚未標示取代` : ''}。文件核對結果已保存；同步完成前，摘要卡不能開放，也不會把這份清單當成最終內容。${can ? '<br><button type="button" class="btn sm primary" id="dxResync">重試同步診斷</button>' : ''}</div>` : ''}
     <p class="small muted" style="margin:0">一筆一個診斷，保留原始文字、來源文件與版本。<strong>本系統沒有內建 ICD-10-CM 碼表，不會自動產生或建議代碼</strong>；代碼請依院方文件或官方碼表人工輸入，系統只檢查格式。只有「已確認」的診斷會進入照護摘要；預計對應 FHIR Condition（尚未介接）。</p>
-    ${L.length ? `<div class="tbl-wrap"><table><thead><tr><th>原始診斷文字</th><th>標準化名稱</th><th>ICD-10-CM</th><th>來源</th><th>狀態</th><th></th></tr></thead><tbody id="dxRows">${L.map((d, n) => `<tr><td>${esc(d.raw)}</td><td>${esc(d.std || '—')}</td><td class="mono">${esc(d.icd || '—')}${d.icdName ? `<br><span class="small">${esc(d.icdName)}</span>` : ''}</td><td class="small">${d.src ? esc(d.src.name) + `（第 ${esc(d.src.v)} 版）` : '人工新增'}</td><td>${d.superseded ? pill('已由新版取代', 'mute') : pill(d.state, d.state === '已確認' ? 'ok' : 'warn')}${d.by ? `<br><span class="small muted">${esc(R.accName(d.by))} ${esc(d.at || '')}</span>` : ''}</td><td>${can ? `<button type="button" class="btn sm" data-dx="${n}">編輯／確認</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="small">${R.confirmedField(c, 'dx') ? `目前只有病摘核對時確認的診斷文字：「${esc(R.confirmedField(c, 'dx'))}」（舊格式，照護摘要沿用這段文字）。` : '尚無診斷資料。'}</p>`}
+    ${L.length ? `<div class="tbl-wrap"><table><thead><tr><th>原始診斷文字</th><th>標準化名稱</th><th>ICD-10-CM</th><th>來源</th><th>狀態</th><th></th></tr></thead><tbody id="dxRows">${L.map((d, n) => `<tr><td>${esc(d.raw)}</td><td>${esc(d.std || '—')}</td><td class="mono">${esc(d.icd || '—')}${d.icdName ? `<br><span class="small">${esc(d.icdName)}</span>` : ''}</td><td class="small">${d.src ? esc(d.src.name) + `（第 ${esc(d.src.v)} 版）` : '人工新增'}</td><td>${d.superseded ? pill('已由新版取代', 'mute') : pill(d.state, d.state === '已確認' ? 'ok' : 'warn')}${d.by ? `<br><span class="small muted">${esc(R.accName(d.by))} ${esc(d.at || '')}</span>` : ''}</td><td>${can ? `<button type="button" class="btn sm" data-dx="${n}">編輯／確認</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+    <details class="small" id="dxHist"><summary>診斷修改歷程</summary><div id="dxHistBody" class="muted">打開時載入…</div></details>` : `<p class="small">${R.confirmedField(c, 'dx') ? `目前只有病摘核對時確認的診斷文字：「${esc(R.confirmedField(c, 'dx'))}」（舊格式，照護摘要沿用這段文字）。` : '尚無診斷資料。'}</p>`}
     ${can ? `<div class="row">${src ? '<button type="button" class="btn sm" id="dxImport">從已確認的病摘帶入原始診斷</button>' : ''}<button type="button" class="btn sm" data-dx="-1">新增一筆診斷</button></div>` : ''}</div>`;
 }
 const canSupp = (R, it, c) => c.nurseId === ME.id && R.canProcess(c) && R.listOk(c) && R.catOf(it) === 'D' && R.isNeeded(it) && ['未上傳', '需補件'].includes(R.status(it, c));
@@ -192,6 +193,16 @@ function bindResident(main, R, c){
       } });
   }));
   /* 診斷清單 */
+  /* 診斷修改歷程（diagnosis_changes：新增、確認、修改、不採用都有一筆；醫療資料的修改要能追溯，2026/11/28 資料庫清理時決定顯示）。
+   * 打開時才讀，只有承辦護理師讀得到（RLS diagnosis_changes_read） */
+  main.querySelector('#dxHist')?.addEventListener('toggle', async e => {
+    const box = main.querySelector('#dxHistBody'); if (!e.currentTarget.open || box.dataset.loaded) return;
+    const ids = (c.diagnoses || []).map(d => d.id), textOf = Object.fromEntries((c.diagnoses || []).map(d => [d.id, d.std || d.raw]));
+    const { data, error } = await supabase().from('diagnosis_changes').select('diagnosis_id, from_status, to_status, text_before, text_after, reason, by, at').in('diagnosis_id', ids).order('at');
+    if (error){ box.textContent = '讀取修改歷程失敗：' + errText(error) + '。請重新打開。'; return; }
+    box.dataset.loaded = '1'; box.classList.remove('muted');
+    box.innerHTML = !data.length ? '<p class="muted">沒有紀錄。</p>' : `<div class="tbl-wrap"><table><thead><tr><th>時間</th><th>人員</th><th>診斷</th><th>變更</th><th>說明</th></tr></thead><tbody>${data.map(h => `<tr><td>${esc(toStamp(h.at))}</td><td>${esc(R.accName(h.by))}</td><td>${esc(textOf[h.diagnosis_id] || '')}</td><td>${esc((h.from_status ? h.from_status + ' → ' : '') + h.to_status)}${h.text_before && h.text_before !== h.text_after ? `<br><span class="muted">「${esc(h.text_before)}」→「${esc(h.text_after || '')}」</span>` : ''}</td><td>${esc(h.reason || '')}</td></tr>`).join('')}</tbody></table></div>`;
+  });
   main.querySelector('#dxResync')?.addEventListener('click', async e => {
     e.currentTarget.disabled = true;
     const { error } = await supabase().rpc('dx_resync', { p_case: c.id });

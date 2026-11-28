@@ -13,8 +13,8 @@
  * 個案資料夾預設收合，展開狀態記在 localStorage（HANDOFF 10.9）；搜尋與排序記在 sessionStorage。 */
 import { bootPage } from '../page.js';
 import { supabase } from '../api/supabase.js';
-import { loadModel } from './services/model.js';
-import { openConflicts } from './services/conflicts.js';
+import { loadModel, toStamp } from './services/model.js';
+import { openConflicts, resolvedConflicts } from './services/conflicts.js';
 import { badgeCounts } from './services/badges.js';
 import { esc, pill, helpLine, modal, toast, errText } from '../ui.js';
 import { accountCard, bindAccountCard } from './family-ui.js';
@@ -39,7 +39,7 @@ bootPage('dashboard', async ({ main, me, view, params, shell, org }) => {
     return familyPersonal(ctx);
   }
   if (me.role === 'staff' || me.role === 'nurse'){
-    if (me.role === 'staff') ctx.conflicts = await openConflicts();
+    if (me.role === 'staff'){ ctx.conflicts = await openConflicts(); if (params.get('tab') === 'done') ctx.resolved = await resolvedConflicts(); }
     return workHome(ctx);
   }
 });
@@ -106,7 +106,7 @@ function workHome(ctx){
   const t = R.tasks();
   const tabs = `<div class="seg" role="group" aria-label="工作清單" style="margin-bottom:12px"><a class="seg-a" href="dashboard.html" aria-pressed="${tab !== 'done'}">待處理（${t.filter(x => !x.opt).length}）</a><a class="seg-a" href="dashboard.html?tab=done" aria-pressed="${tab === 'done'}">已完成</a></div>`;
   if (tab === 'done'){
-    main.innerHTML = `<h1>${nurse ? '我的工作清單' : '工作清單'}</h1>${tabs}${doneFolders(ctx)}`;
+    main.innerHTML = `<h1>${nurse ? '我的工作清單' : '工作清單'}</h1>${tabs}${doneFolders(ctx)}${resolvedCard(ctx.resolved)}`;
     return bindFolders(ctx, () => workHome(ctx));
   }
   let head;
@@ -196,6 +196,14 @@ function conflictsCard(list){
       <td>${esc(x.submitted_name)}<br><span class="small">生日 ${slash(x.submitted_birth || '')}</span></td>
       <td>${esc(x.residents?.name || '')}<br><span class="small">生日 ${slash(x.residents?.birth || '')}　<span class="mono">${esc(x.residents?.nid || '')}</span></span></td>
       <td><button type="button" class="btn sm" data-resolve="${x.id}">標示已處理</button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+/* 已處理的住民資料不一致（沒有建立申請，所以不在個案資料夾裡） */
+function resolvedCard(list){
+  if (!list || !list.length) return '';
+  return `<details class="card" id="resolvedConflicts" style="margin-top:12px"><summary><strong>住民資料不一致（已處理 ${list.length}）</strong></summary>
+    <div class="tbl-wrap"><table><thead><tr><th>處理時間</th><th>申請人／申請時填寫</th><th>處理人</th><th>處理說明</th></tr></thead><tbody>${list.map(x => `<tr>
+      <td class="small">${esc(toStamp(x.resolved_at))}</td><td>${esc(x.family?.name || '')}<br><span class="small">${esc(x.submitted_name)}</span></td>
+      <td>${esc(x.resolver?.name || '')}</td><td class="small">${esc(x.resolution || '')}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 function bindConflicts({ main }){
   main.querySelectorAll('[data-resolve]').forEach(b => b.addEventListener('click', () => modal({ title: '標示已處理', ok: '儲存',

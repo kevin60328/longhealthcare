@@ -8,6 +8,9 @@ test('管理員：帳號管理、機構設定（文件清單、資料存取說�
   await expect(page.getByRole('heading', { name: '帳號管理' })).toBeVisible();
   await expect(page.locator('#accRows tr[data-acc="staff@example.com"]')).toContainText('行政／社工');
   await expect(page.locator('#accRows tr[data-acc="admin@example.com"]')).toContainText('（您）');
+  /* 最後登入（profiles.last_login_at，000035 清理時決定顯示）：管理員剛登入，一定有時間 */
+  await expect(page.locator('table:has(#accRows) thead')).toContainText('最後登入');
+  await expect(page.locator('#accRows tr[data-acc="admin@example.com"]')).toContainText(/\d{4}\/\d{2}\/\d{2}/);
   expect(await currentTab(page)).toBe('accounts');
 
   await page.getByRole('link', { name: '機構設定' }).click();
